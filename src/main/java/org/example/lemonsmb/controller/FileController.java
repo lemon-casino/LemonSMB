@@ -25,7 +25,10 @@ public class FileController {
     }
 
     @GetMapping("/files")
-    public CompletableFuture<List<String>> list(@RequestParam(defaultValue = "") String path) {
-        return smbService.listFiles(path);
+    public CompletableFuture<List<String>> list(
+            @RequestParam(defaultValue = "") String path,
+            @RequestParam(defaultValue = "0") int offset,
+            @RequestParam(defaultValue = "20") int limit) {
+        return smbService.listFiles(path, offset, limit);
     }
 }

@@ -32,11 +32,18 @@ public class SmbService {
     }
 
     @Async
-    public CompletableFuture<List<String>> listFiles(String path) {
+    public CompletableFuture<List<String>> listFiles(String path, int offset, int limit) {
         List<String> result = new ArrayList<>();
         try (DiskShare share = connectShare()) {
+            int count = 0;
             for (FileIdBothDirectoryInformation f : share.list(path)) {
+                if (count++ < offset) {
+                    continue;
+                }
                 result.add(f.getFileName());
+                if (result.size() >= limit) {
+                    break;
+                }
             }
         } catch (IOException e) {
             result.add("ERROR:" + e.getMessage());
