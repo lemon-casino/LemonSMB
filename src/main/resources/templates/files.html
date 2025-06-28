@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8" />
+    <title>Files</title>
+</head>
+<body>
+<h1>Files</h1>
+<ul id="fileList"></ul>
+<script>
+    fetch('/files?path=')
+        .then(r => r.json())
+        .then(list => {
+            const ul = document.getElementById('fileList');
+            list.forEach(f => {
+                const li = document.createElement('li');
+                li.textContent = f;
+                ul.appendChild(li);
+            });
+        });
+</script>
+</body>
+</html>
