@@ -33,6 +33,51 @@ public class SmbService {
     private final ObjectMapper mapper = new ObjectMapper();
     private JsonNode metadataCache;
 
+    private byte[] readBytes(String remotePath) throws IOException {
+        try (DiskShare share = connectShare()) {
+            try {
+                File f = share.openFile(remotePath,
+                        EnumSet.of(AccessMask.GENERIC_READ),
+                        null,
+                        SMB2ShareAccess.ALL,
+                        SMB2CreateDisposition.FILE_OPEN,
+                        null);
+                try (InputStream is = f.getInputStream()) {
+                    return is.readAllBytes();
+                }
+            } catch (com.hierynomus.mssmb2.SMBApiException e) {
+                throw new IOException(e);
+            }
+        }
+    }
+
+    @Async
+    public CompletableFuture<byte[]> loadImage(String id, boolean thumbnail) {
+        String imageId = id;
+        String ext = "";
+        int dot = id.lastIndexOf('.');
+        if (dot > 0) {
+            imageId = id.substring(0, dot);
+            ext = id.substring(dot + 1);
+        }
+        String imagesBase = properties.getLibraryDir() + "/images";
+        String infoDir = imagesBase + "/" + imageId + ".info";
+        String metaPath = infoDir + "/metadata.json";
+        try {
+            String meta = new String(readBytes(metaPath), StandardCharsets.UTF_8);
+            JsonNode node = mapper.readTree(meta);
+            String name = node.path("name").asText();
+            if (ext.isEmpty()) {
+                ext = node.path("ext").asText();
+            }
+            String fileName = name + (thumbnail ? "_thumbnail" : "") + "." + ext;
+            String imgPath = infoDir + "/" + fileName;
+            return CompletableFuture.completedFuture(readBytes(imgPath));
+        } catch (IOException e) {
+            return CompletableFuture.completedFuture(new byte[0]);
+        }
+    }
+
     public SmbProperties getProperties() {
         return properties;
     }
