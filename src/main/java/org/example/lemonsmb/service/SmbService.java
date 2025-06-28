@@ -123,6 +123,7 @@ public class SmbService {
                         }
                     } catch (IOException | com.hierynomus.mssmb2.SMBApiException e) {
                         // Skip files without metadata or inaccessible entries
+
                     }
                 }
             }
