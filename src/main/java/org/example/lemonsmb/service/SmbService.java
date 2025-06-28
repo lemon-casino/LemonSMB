@@ -51,14 +51,19 @@ public class SmbService {
      */
     public String readFile(String remotePath) throws IOException {
         try (DiskShare share = connectShare()) {
-            File f = share.openFile(remotePath,
-                    EnumSet.of(AccessMask.GENERIC_READ),
-                    null,
-                    SMB2ShareAccess.ALL,
-                    SMB2CreateDisposition.FILE_OPEN,
-                    null);
-            try (InputStream is = f.getInputStream()) {
-                return new String(is.readAllBytes(), StandardCharsets.UTF_8);
+            try {
+                File f = share.openFile(remotePath,
+                        EnumSet.of(AccessMask.GENERIC_READ),
+                        null,
+                        SMB2ShareAccess.ALL,
+                        SMB2CreateDisposition.FILE_OPEN,
+                        null);
+                try (InputStream is = f.getInputStream()) {
+                    return new String(is.readAllBytes(), StandardCharsets.UTF_8);
+                }
+            } catch (com.hierynomus.mssmb2.SMBApiException e) {
+                // Wrap SMB errors so callers can handle uniformly
+                throw new IOException(e);
             }
         }
     }
@@ -86,8 +91,14 @@ public class SmbService {
                     }
                     String imageId = f.getFileName().replace(".info", "");
                     String metaPath = imagesBase + "/" + f.getFileName() + "/metadata.json";
-                    try {
-                        String imgMeta = readFile(metaPath);
+                    try (File mf = share.openFile(metaPath,
+                            EnumSet.of(AccessMask.GENERIC_READ),
+                            null,
+                            SMB2ShareAccess.ALL,
+                            SMB2CreateDisposition.FILE_OPEN,
+                            null);
+                         InputStream is = mf.getInputStream()) {
+                        String imgMeta = new String(is.readAllBytes(), StandardCharsets.UTF_8);
                         JsonNode node = mapper.readTree(imgMeta);
                         boolean match = folderId == null;
                         if (folderId != null) {
@@ -110,7 +121,9 @@ public class SmbService {
                                 break;
                             }
                         }
-                    } catch (IOException ignore) {
+                    } catch (IOException | com.hierynomus.mssmb2.SMBApiException e) {
+                        // Skip files without metadata or inaccessible entries
+
                     }
                 }
             }
