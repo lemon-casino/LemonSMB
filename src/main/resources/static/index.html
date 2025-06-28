@@ -4,23 +4,26 @@
     <meta charset="UTF-8">
     <title>SMB Browser</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 0; }
-        #menu { width: 250px; height: 100vh; overflow-y: auto; border-right: 1px solid #ccc; float: left; padding: 0 10px; box-sizing: border-box; }
-        #files { margin-left: 250px; padding: 10px; }
+        body { font-family: Arial, sans-serif; margin: 0; display: flex; }
+        #menu { width: 220px; height: 100vh; overflow-y: auto; border-right: 1px solid #ccc; padding: 10px; box-sizing: border-box; background: #f7f7f7; }
+        #files { flex: 1; height: 100vh; overflow-y: auto; padding: 10px; box-sizing: border-box; display: flex; flex-wrap: wrap; gap: 10px; align-content: flex-start; }
         ul { list-style: none; padding-left: 20px; }
-        li { cursor: pointer; }
+        li { cursor: pointer; padding: 4px 0; }
+        li:hover { background: #eee; }
+        .thumb { width: 200px; height: 150px; object-fit: cover; border-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,0.2); }
     </style>
 </head>
 <body>
 <div id="menu"></div>
 <div id="files">
-    <ul id="fileList"></ul>
-    <button id="loadMore" style="display:none">Load more</button>
+    <div id="fileList"></div>
 </div>
 <script>
     let currentPath = '';
     let offset = 0;
     const limit = 20;
+    let loading = false;
+    let hasMore = true;
 
     function buildMenu(parent, nodes, path) {
         const ul = document.createElement('ul');
@@ -42,27 +45,33 @@
     }
 
     function loadFiles() {
+        if (loading || !hasMore) return;
+        loading = true;
         fetch(`/files?path=${encodeURIComponent(currentPath)}&offset=${offset}&limit=${limit}`)
             .then(r => r.json())
             .then(list => {
-                const ul = document.getElementById('fileList');
+                const container = document.getElementById('fileList');
                 list.forEach(f => {
-                    const li = document.createElement('li');
-                    li.textContent = f;
-                    ul.appendChild(li);
+                    const img = document.createElement('img');
+                    img.className = 'thumb';
+                    img.src = `/image?id=${encodeURIComponent(f)}&thumbnail=true`;
+                    container.appendChild(img);
                 });
-                if (list.length === limit) {
-                    document.getElementById('loadMore').style.display = 'block';
-                } else {
-                    document.getElementById('loadMore').style.display = 'none';
+                if (list.length < limit) {
+                    hasMore = false;
                 }
-            });
+                offset += list.length;
+            })
+            .finally(() => loading = false);
     }
 
-    document.getElementById('loadMore').onclick = () => {
-        offset += limit;
-        loadFiles();
-    };
+
+    document.getElementById('files').addEventListener('scroll', () => {
+        const c = document.getElementById('files');
+        if (c.scrollTop + c.clientHeight >= c.scrollHeight - 50) {
+            loadFiles();
+        }
+    });
 
     fetch('/metadata')
         .then(r => r.json())
