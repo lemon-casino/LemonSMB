@@ -15,7 +15,6 @@ public class SmbProperties {
      * "视觉素材库/视觉素材库.library".
      */
     private String libraryDir;
-
     public String getHost() { return host; }
     public void setHost(String host) { this.host = host; }
 
@@ -27,7 +26,6 @@ public class SmbProperties {
 
     public String getShare() { return share; }
     public void setShare(String share) { this.share = share; }
-
     public String getLibraryDir() { return libraryDir; }
     public void setLibraryDir(String libraryDir) { this.libraryDir = libraryDir; }
 }
