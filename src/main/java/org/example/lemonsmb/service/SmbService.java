@@ -11,6 +11,8 @@ import com.hierynomus.smbj.session.Session;
 import com.hierynomus.smbj.share.DiskShare;
 import com.hierynomus.smbj.share.File;
 import org.example.lemonsmb.config.SmbProperties;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -27,6 +29,9 @@ public class SmbService {
 
     @Autowired
     private SmbProperties properties;
+
+    private final ObjectMapper mapper = new ObjectMapper();
+    private JsonNode metadataCache;
 
     public SmbProperties getProperties() {
         return properties;
@@ -61,24 +66,72 @@ public class SmbService {
     @Async
     public CompletableFuture<List<String>> listFiles(String path, int offset, int limit) {
         List<String> result = new ArrayList<>();
-        String target = properties.getLibraryDir() + "/images";
-        if (path != null && !path.isEmpty()) {
-            target = target + "/" + path;
-        }
-        try (DiskShare share = connectShare()) {
-            int count = 0;
-            for (FileIdBothDirectoryInformation f : share.list(target)) {
-                if (count++ < offset) {
-                    continue;
-                }
-                result.add(f.getFileName());
-                if (result.size() >= limit) {
-                    break;
+        try {
+            if (metadataCache == null) {
+                String meta = readFile(properties.getLibraryDir() + "/metadata.json");
+                metadataCache = mapper.readTree(meta).path("folders");
+            }
+
+            String folderId = null;
+            if (path != null && !path.isEmpty()) {
+                folderId = findFolderId(metadataCache, path.split("/"), 0);
+            }
+
+            String imagesBase = properties.getLibraryDir() + "/images";
+            try (DiskShare share = connectShare()) {
+                int processed = 0;
+                for (FileIdBothDirectoryInformation f : share.list(imagesBase)) {
+                    if (!f.getFileName().endsWith(".info")) {
+                        continue;
+                    }
+                    String imageId = f.getFileName().replace(".info", "");
+                    String metaPath = imagesBase + "/" + f.getFileName() + "/metadata.json";
+                    try {
+                        String imgMeta = readFile(metaPath);
+                        JsonNode node = mapper.readTree(imgMeta);
+                        boolean match = folderId == null;
+                        if (folderId != null) {
+                            JsonNode arr = node.path("folders");
+                            if (arr.isArray()) {
+                                for (JsonNode n : arr) {
+                                    if (folderId.equals(n.asText())) {
+                                        match = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if (match) {
+                            if (processed++ < offset) {
+                                continue;
+                            }
+                            result.add(imageId + "." + node.path("ext").asText());
+                            if (result.size() >= limit) {
+                                break;
+                            }
+                        }
+                    } catch (IOException ignore) {
+                    }
                 }
             }
         } catch (IOException e) {
             result.add("ERROR:" + e.getMessage());
         }
         return CompletableFuture.completedFuture(result);
+    }
+
+    private String findFolderId(JsonNode folders, String[] names, int index) {
+        if (folders == null || index >= names.length) {
+            return null;
+        }
+        for (JsonNode folder : folders) {
+            if (names[index].equals(folder.path("name").asText())) {
+                if (index == names.length - 1) {
+                    return folder.path("id").asText();
+                }
+                return findFolderId(folder.path("children"), names, index + 1);
+            }
+        }
+        return null;
     }
 }
