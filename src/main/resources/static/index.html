@@ -1,6 +1,76 @@
-<html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>SMB Browser</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; }
+        #menu { width: 250px; height: 100vh; overflow-y: auto; border-right: 1px solid #ccc; float: left; padding: 0 10px; box-sizing: border-box; }
+        #files { margin-left: 250px; padding: 10px; }
+        ul { list-style: none; padding-left: 20px; }
+        li { cursor: pointer; }
+    </style>
+</head>
 <body>
-<h1>hello word!!!</h1>
-<p>this is a html page</p>
+<div id="menu"></div>
+<div id="files">
+    <ul id="fileList"></ul>
+    <button id="loadMore" style="display:none">Load more</button>
+</div>
+<script>
+    let currentPath = '';
+    let offset = 0;
+    const limit = 20;
+
+    function buildMenu(parent, nodes, path) {
+        const ul = document.createElement('ul');
+        nodes.forEach(n => {
+            const li = document.createElement('li');
+            li.textContent = n.name;
+            li.onclick = () => {
+                currentPath = path + '/' + n.name;
+                offset = 0;
+                document.getElementById('fileList').innerHTML = '';
+                loadFiles();
+                if (n.children && n.children.length > 0 && !li.querySelector('ul')) {
+                    buildMenu(li, n.children, currentPath);
+                }
+            };
+            ul.appendChild(li);
+        });
+        parent.appendChild(ul);
+    }
+
+    function loadFiles() {
+        fetch(`/files?path=${encodeURIComponent(currentPath)}&offset=${offset}&limit=${limit}`)
+            .then(r => r.json())
+            .then(list => {
+                const ul = document.getElementById('fileList');
+                list.forEach(f => {
+                    const li = document.createElement('li');
+                    li.textContent = f;
+                    ul.appendChild(li);
+                });
+                if (list.length === limit) {
+                    document.getElementById('loadMore').style.display = 'block';
+                } else {
+                    document.getElementById('loadMore').style.display = 'none';
+                }
+            });
+    }
+
+    document.getElementById('loadMore').onclick = () => {
+        offset += limit;
+        loadFiles();
+    };
+
+    fetch('/metadata')
+        .then(r => r.json())
+        .then(data => {
+            if (data && data.folders) {
+                buildMenu(document.getElementById('menu'), data.folders, '视觉素材库');
+            }
+        });
+</script>
 </body>
 </html>
