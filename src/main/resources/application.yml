@@ -22,3 +22,4 @@ smb:
   username: admin
   password: admin
   share: DATA
+  libraryDir: 视觉素材库/视觉素材库.library
