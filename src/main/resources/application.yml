@@ -13,12 +13,14 @@ spring:
     prefix: classpath:/templates/
     suffix: .html
   redis:
-    host: localhost
-    port: 6379
-    database: 0
+    host: 127.0.0.1
+#    password: Abc.123456
+    port : 6379
+    username: default
+    database: 2
 
 smb:
-  host: 125.122.3.186
+  host: 183.134.170.168
   username: admin
   password: admin
   share: DATA

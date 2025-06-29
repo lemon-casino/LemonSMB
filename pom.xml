@@ -8,10 +8,15 @@
     <name>LemonSMB</name>
     <description>LemonSMB</description>
     <properties>
-        <java.version>19</java.version>
+        <java.version>21</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <spring-boot.version>2.6.13</spring-boot.version>
+        <!-- 用于统一管理文件排除规则 -->
+        <excludeFilesPattern>*.properties,*.yml,*.xml,*.txt</excludeFilesPattern>
+        <libDirectory>lib</libDirectory>
+        <resourcesDirectory>resources</resourcesDirectory>
+        <outputDirectory>${project.build.directory}</outputDirectory>
     </properties>
     <dependencies>
         <dependency>
@@ -55,36 +60,137 @@
         </dependencies>
     </dependencyManagement>
 
+
     <build>
+        <finalName>${project.artifactId}</finalName>
+
         <plugins>
+            <!-- 打JAR包，避免重复配置剔除文件 -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.8.1</version>
+                <artifactId>maven-jar-plugin</artifactId>
                 <configuration>
-                    <source>19</source>
-                    <target>19</target>
-                    <encoding>UTF-8</encoding>
+                    <!-- 使用统一的排除规则 -->
+                    <excludes>
+                        <exclude>${excludeFilesPattern}</exclude>
+                    </excludes>
+                    <archive>
+                        <manifest>
+                            <addClasspath>true</addClasspath>
+                            <classpathPrefix>${libDirectory}/</classpathPrefix>
+                            <useUniqueVersions>false</useUniqueVersions>
+                        </manifest>
+                        <manifestEntries>
+                            <Class-Path>${resourcesDirectory}/</Class-Path>
+                        </manifestEntries>
+                    </archive>
+                    <outputDirectory>${outputDirectory}</outputDirectory>
                 </configuration>
             </plugin>
+
+            <!-- 复制依赖的JAR包到指定文件夹 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>copy-dependencies</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy-dependencies</goal>
+                        </goals>
+                        <configuration>
+                            <includeScope>runtime</includeScope>
+                            <outputDirectory>${outputDirectory}/${libDirectory}/</outputDirectory>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- 用于复制指定的文件 -->
+            <plugin>
+                <artifactId>maven-resources-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>copy-resources</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <resources>
+                                <resource>
+                                    <directory>src/main/resources</directory>
+                                    <includes>
+                                        <!-- 使用统一排除规则 -->
+                                        <exclude>${excludeFilesPattern}</exclude>
+                                    </includes>
+                                </resource>
+                            </resources>
+                            <outputDirectory>${outputDirectory}/${resourcesDirectory}/</outputDirectory>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Spring Boot 插件 -->
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
-                <version>${spring-boot.version}</version>
                 <configuration>
-                    <mainClass>org.example.lemonsmb.LemonSmbApplication</mainClass>
-                    <skip>true</skip>
+                    <classifier>Lemon</classifier>
+                    <includes>
+                        <include>
+                            <groupId>null</groupId>
+                            <artifactId>null</artifactId>
+                        </include>
+                    </includes>
+                    <outputDirectory>${outputDirectory}</outputDirectory>
                 </configuration>
                 <executions>
                     <execution>
-                        <id>repackage</id>
                         <goals>
                             <goal>repackage</goal>
                         </goals>
                     </execution>
                 </executions>
             </plugin>
+
+            <!-- 跳过单元测试 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <skipTests>true</skipTests>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <source>14</source>
+                    <target>14</target>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
+
+    <!-- 用于不同环境的profile配置 -->
+    <profiles>
+        <profile>
+            <id>dev</id>
+            <properties>
+                <skipTests>false</skipTests> <!-- 在开发环境中不跳过测试 -->
+            </properties>
+        </profile>
+
+        <profile>
+            <id>prod</id>
+            <properties>
+                <skipTests>true</skipTests> <!-- 在生产环境中跳过测试 -->
+            </properties>
+        </profile>
+    </profiles>
+
 
 </project>

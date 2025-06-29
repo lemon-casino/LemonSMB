@@ -11,6 +11,7 @@ import com.hierynomus.smbj.session.Session;
 import com.hierynomus.smbj.share.DiskShare;
 import com.hierynomus.smbj.share.File;
 import org.example.lemonsmb.config.SmbProperties;
+import org.example.lemonsmb.model.FileInfo;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +21,8 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
@@ -63,6 +66,9 @@ public class SmbService {
         String imagesBase = properties.getLibraryDir() + "/images";
         String infoDir = imagesBase + "/" + imageId + ".info";
         String metaPath = infoDir + "/metadata.json";
+        
+        System.out.println("加载图片 - ID: " + id + ", thumbnail: " + thumbnail);
+        
         try {
             String meta = new String(readBytes(metaPath), StandardCharsets.UTF_8);
             JsonNode node = mapper.readTree(meta);
@@ -70,11 +76,127 @@ public class SmbService {
             if (ext.isEmpty()) {
                 ext = node.path("ext").asText();
             }
-            String fileName = name + (thumbnail ? "_thumbnail" : "") + "." + ext;
-            String imgPath = infoDir + "/" + fileName;
-            return CompletableFuture.completedFuture(readBytes(imgPath));
+            
+            // 如果请求缩略图，先尝试加载缩略图
+            if (thumbnail) {
+                String thumbnailFileName = name + "_thumbnail." + ext;
+                String thumbnailPath = infoDir + "/" + thumbnailFileName;
+                
+                try {
+                    System.out.println("尝试加载缩略图: " + thumbnailPath);
+                    byte[] data = readBytes(thumbnailPath);
+                    System.out.println("缩略图加载成功，数据长度: " + data.length);
+                    return CompletableFuture.completedFuture(data);
+                } catch (IOException thumbnailError) {
+                    System.out.println("缩略图不存在，回退到原图: " + thumbnailError.getMessage());
+                    // 缩略图不存在，回退到原图
+                }
+            }
+            
+            // 加载原图
+            String originalFileName = name + "." + ext;
+            String originalPath = infoDir + "/" + originalFileName;
+            System.out.println("加载原图: " + originalPath);
+            
+            byte[] data = readBytes(originalPath);
+            System.out.println("原图加载成功，数据长度: " + data.length);
+            return CompletableFuture.completedFuture(data);
+            
+        } catch (IOException e) {
+            System.out.println("加载图片完全失败: " + e.getMessage());
+            return CompletableFuture.completedFuture(new byte[0]);
+        }
+    }
+
+    /**
+     * 异步加载任意文件的字节数据
+     */
+    @Async
+    public CompletableFuture<byte[]> loadFile(String id) {
+        String imageId = id;
+        String ext = "";
+        int dot = id.lastIndexOf('.');
+        if (dot > 0) {
+            imageId = id.substring(0, dot);
+            ext = id.substring(dot + 1);
+        }
+        String imagesBase = properties.getLibraryDir() + "/images";
+        String infoDir = imagesBase + "/" + imageId + ".info";
+        String metaPath = infoDir + "/metadata.json";
+        try {
+            String meta = new String(readBytes(metaPath), StandardCharsets.UTF_8);
+            JsonNode node = mapper.readTree(meta);
+            String name = node.path("name").asText();
+            if (ext.isEmpty()) {
+                ext = node.path("ext").asText();
+            }
+            String fileName = name + "." + ext;
+            String filePath = infoDir + "/" + fileName;
+            return CompletableFuture.completedFuture(readBytes(filePath));
         } catch (IOException e) {
             return CompletableFuture.completedFuture(new byte[0]);
+        }
+    }
+
+    /**
+     * 异步获取文件详细信息
+     */
+    @Async
+    public CompletableFuture<FileInfo> getFileInfo(String id) {
+        String imageId = id;
+        String ext = "";
+        int dot = id.lastIndexOf('.');
+        if (dot > 0) {
+            imageId = id.substring(0, dot);
+            ext = id.substring(dot + 1);
+        }
+        String imagesBase = properties.getLibraryDir() + "/images";
+        String infoDir = imagesBase + "/" + imageId + ".info";
+        String metaPath = infoDir + "/metadata.json";
+        
+        try {
+            String meta = new String(readBytes(metaPath), StandardCharsets.UTF_8);
+            JsonNode node = mapper.readTree(meta);
+            String name = node.path("name").asText();
+            if (ext.isEmpty()) {
+                ext = node.path("ext").asText();
+            }
+            String fileName = name + "." + ext;
+            String filePath = infoDir + "/" + fileName;
+            
+            // 从元数据获取文件信息
+            FileInfo info = new FileInfo();
+            info.setName(fileName);
+            info.setSize(node.path("size").asLong(0)); // 从元数据获取大小
+            info.setLastModified(LocalDateTime.now()); // 使用当前时间作为默认值
+            info.setDirectory(false);
+            info.setPath(filePath);
+            
+            // 尝试获取实际文件大小
+            try (DiskShare share = connectShare()) {
+                try {
+                    com.hierynomus.msfscc.fileinformation.FileStandardInformation fileStdInfo = 
+                        share.getFileInformation(filePath).getStandardInformation();
+                    if (fileStdInfo != null) {
+                        info.setSize(fileStdInfo.getEndOfFile());
+                    }
+                } catch (Exception e) {
+                    // 如果获取文件信息失败，使用元数据中的信息
+                }
+            } catch (Exception e) {
+                // 如果连接失败，使用元数据中的信息
+            }
+            
+            return CompletableFuture.completedFuture(info);
+        } catch (IOException e) {
+            // 返回默认文件信息
+            FileInfo info = new FileInfo();
+            info.setName(id);
+            info.setSize(0);
+            info.setLastModified(LocalDateTime.now());
+            info.setDirectory(false);
+            info.setPath(id);
+            return CompletableFuture.completedFuture(info);
         }
     }
 

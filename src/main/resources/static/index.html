@@ -1,85 +1,966 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>SMB Browser</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LemonSMB - 现代化文件浏览器</title>
+    <!-- Bootstrap CSS -->
+    <link href="./style/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link href="./style/css/all.min.css" rel="stylesheet">
+    <!-- Google Fonts -->
+    <link href="./style/css/css2.css" rel="stylesheet">
     <style>
-        body { font-family: Arial, sans-serif; margin: 0; display: flex; }
-        #menu { width: 220px; height: 100vh; overflow-y: auto; border-right: 1px solid #ccc; padding: 10px; box-sizing: border-box; background: #f7f7f7; }
-        #files { flex: 1; height: 100vh; overflow-y: auto; padding: 10px; box-sizing: border-box; display: flex; flex-wrap: wrap; gap: 10px; align-content: flex-start; }
-        ul { list-style: none; padding-left: 20px; }
-        li { cursor: pointer; padding: 4px 0; }
-        li:hover { background: #eee; }
-        .thumb { width: 200px; height: 150px; object-fit: cover; border-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,0.2); }
+        :root {
+            --primary-color: #2563eb;
+            --primary-hover: #1d4ed8;
+            --secondary-color: #64748b;
+            --success-color: #10b981;
+            --warning-color: #f59e0b;
+            --danger-color: #ef4444;
+            --light-bg: #f8fafc;
+            --dark-bg: #1e293b;
+            --border-color: #e2e8f0;
+            --text-primary: #1e293b;
+            --text-secondary: #64748b;
+            --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--light-bg);
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        /* 顶部导航栏 */
+        .top-navbar {
+            background: white;
+            border-bottom: 1px solid var(--border-color);
+            box-shadow: var(--shadow);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .navbar-brand {
+            font-weight: 700;
+            color: var(--primary-color) !important;
+            font-size: 1.5rem;
+        }
+
+        /* 主容器 */
+        .main-container {
+            display: flex;
+            min-height: calc(100vh - 76px);
+        }
+
+        /* 侧边栏 */
+        .sidebar {
+            width: 280px;
+            background: white;
+            border-right: 1px solid var(--border-color);
+            overflow-y: auto;
+            transition: all 0.3s ease;
+        }
+
+        .sidebar-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--light-bg);
+        }
+
+        .sidebar-title {
+            font-weight: 600;
+            color: var(--text-primary);
+            margin: 0;
+            font-size: 1.1rem;
+        }
+
+        /* 文件夹树 */
+        .folder-tree {
+            padding: 15px 0;
+        }
+
+        .folder-tree ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .folder-tree li {
+            margin: 2px 0;
+        }
+
+        .folder-item {
+            display: flex;
+            align-items: center;
+            padding: 8px 20px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            color: var(--text-primary);
+            text-decoration: none;
+            border-radius: 0 25px 25px 0;
+            margin-right: 15px;
+        }
+
+        .folder-item:hover {
+            background: var(--light-bg);
+            color: var(--primary-color);
+            transform: translateX(5px);
+        }
+
+        .folder-item.active {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .folder-item i {
+            margin-right: 12px;
+            width: 16px;
+            text-align: center;
+        }
+
+        /* 主内容区 */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--light-bg);
+        }
+
+        /* 工具栏 */
+        .toolbar {
+            background: white;
+            padding: 15px 25px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .breadcrumb-nav {
+            flex: 1;
+            min-width: 200px;
+        }
+
+        .breadcrumb {
+            background: var(--light-bg);
+            border-radius: 25px;
+            padding: 8px 16px;
+            margin: 0;
+        }
+
+        .breadcrumb-item + .breadcrumb-item::before {
+            content: ">";
+            color: var(--text-secondary);
+        }
+
+        .view-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .btn-view {
+            padding: 8px 12px;
+            border: 1px solid var(--border-color);
+            background: white;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-view:hover, .btn-view.active {
+            background: var(--primary-color);
+            color: white;
+            border-color: var(--primary-color);
+        }
+
+        /* 搜索框 */
+        .search-container {
+            position: relative;
+            width: 250px;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 10px 40px 10px 16px;
+            border: 1px solid var(--border-color);
+            border-radius: 25px;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        .search-input:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        .search-icon {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-secondary);
+        }
+
+        /* 文件网格 */
+        .files-container {
+            flex: 1;
+            padding: 25px;
+            overflow-y: auto;
+        }
+
+        .files-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        /* 文件卡片 */
+        .file-card {
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: var(--shadow);
+            transition: all 0.3s ease;
+            cursor: pointer;
+            border: 1px solid var(--border-color);
+        }
+
+        .file-card:hover {
+            transform: translateY(-5px);
+            box-shadow: var(--shadow-lg);
+            border-color: var(--primary-color);
+        }
+
+        .file-preview {
+            position: relative;
+            height: 160px;
+            overflow: hidden;
+            background: var(--light-bg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .file-preview img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.3s ease;
+        }
+
+        .file-card:hover .file-preview img {
+            transform: scale(1.05);
+        }
+
+        .file-icon {
+            font-size: 3rem;
+            color: var(--text-secondary);
+        }
+
+        .file-info {
+            padding: 15px;
+        }
+
+        .file-name {
+            font-weight: 500;
+            margin-bottom: 5px;
+            word-break: break-word;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .file-meta {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* 加载状态 */
+        .loading-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 40px;
+        }
+
+        .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid var(--border-color);
+            border-top: 4px solid var(--primary-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* 骨架屏 */
+        .skeleton {
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: loading 1.5s infinite;
+        }
+
+        @keyframes loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        .skeleton-card {
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: var(--shadow);
+        }
+
+        .skeleton-preview {
+            height: 160px;
+            background: var(--light-bg);
+        }
+
+        .skeleton-info {
+            padding: 15px;
+        }
+
+        .skeleton-text {
+            height: 16px;
+            border-radius: 4px;
+            margin-bottom: 8px;
+        }
+
+        .skeleton-text.short {
+            width: 60%;
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 100%;
+                position: fixed;
+                top: 76px;
+                left: -100%;
+                height: calc(100vh - 76px);
+                z-index: 999;
+                transition: left 0.3s ease;
+            }
+
+            .sidebar.show {
+                left: 0;
+            }
+
+            .main-content {
+                width: 100%;
+            }
+
+            .files-grid {
+                grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+                gap: 15px;
+            }
+
+            .toolbar {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .search-container {
+                width: 100%;
+            }
+        }
+
+        /* 空状态 */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+        }
+
+        .empty-state i {
+            font-size: 4rem;
+            margin-bottom: 20px;
+            color: var(--border-color);
+        }
+
+        .empty-state h3 {
+            margin-bottom: 10px;
+            color: var(--text-primary);
+        }
     </style>
 </head>
 <body>
-<div id="menu"></div>
-<div id="files">
-    <div id="fileList"></div>
-</div>
-<script>
-    let currentPath = '';
-    let offset = 0;
-    const limit = 20;
-    let loading = false;
-    let hasMore = true;
+    <!-- 顶部导航栏 -->
+    <nav class="navbar navbar-expand-lg top-navbar">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <i class="fas fa-lemon"></i> LemonSMB
+            </a>
+            <button class="navbar-toggler" type="button" id="sidebarToggle">
+                <i class="fas fa-bars"></i>
+            </button>
+        </div>
+    </nav>
 
-    function buildMenu(parent, nodes, path) {
-        const ul = document.createElement('ul');
-        nodes.forEach(n => {
-            const li = document.createElement('li');
-            li.textContent = n.name;
-            li.onclick = () => {
-                currentPath = path + '/' + n.name;
-                offset = 0;
-                document.getElementById('fileList').innerHTML = '';
-                loadFiles();
-                if (n.children && n.children.length > 0 && !li.querySelector('ul')) {
-                    buildMenu(li, n.children, currentPath);
-                }
-            };
-            ul.appendChild(li);
-        });
-        parent.appendChild(ul);
-    }
+    <!-- 主容器 -->
+    <div class="main-container">
+        <!-- 侧边栏 -->
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h5 class="sidebar-title">
+                    <i class="fas fa-folder-tree"></i> 文件夹
+                </h5>
+            </div>
+            <div class="folder-tree" id="folderTree">
+                <!-- 文件夹树将在这里动态生成 -->
+            </div>
+        </div>
 
-    function loadFiles() {
-        if (loading || !hasMore) return;
-        loading = true;
-        fetch(`/files?path=${encodeURIComponent(currentPath)}&offset=${offset}&limit=${limit}`)
-            .then(r => r.json())
-            .then(list => {
-                const container = document.getElementById('fileList');
-                list.forEach(f => {
-                    const img = document.createElement('img');
-                    img.className = 'thumb';
-                    img.src = `/image?id=${encodeURIComponent(f)}&thumbnail=true`;
-                    container.appendChild(img);
-                });
-                if (list.length < limit) {
-                    hasMore = false;
-                }
-                offset += list.length;
-            })
-            .finally(() => loading = false);
-    }
+        <!-- 主内容区 -->
+        <div class="main-content">
+            <!-- 工具栏 -->
+            <div class="toolbar">
+                <nav class="breadcrumb-nav">
+                    <ol class="breadcrumb" id="breadcrumb">
+                        <li class="breadcrumb-item active">首页</li>
+                    </ol>
+                </nav>
+                
+                <div class="view-controls">
+                    <button class="btn-view active" id="gridView" title="网格视图">
+                        <i class="fas fa-th"></i>
+                    </button>
+                    <button class="btn-view" id="listView" title="列表视图">
+                        <i class="fas fa-list"></i>
+                    </button>
+                </div>
 
+                <div class="search-container">
+                    <input type="text" class="search-input" placeholder="搜索文件..." id="searchInput">
+                    <i class="fas fa-search search-icon"></i>
+                </div>
+            </div>
 
-    document.getElementById('files').addEventListener('scroll', () => {
-        const c = document.getElementById('files');
-        if (c.scrollTop + c.clientHeight >= c.scrollHeight - 50) {
-            loadFiles();
-        }
-    });
+            <!-- 文件容器 -->
+            <div class="files-container">
+                <div class="files-grid" id="filesGrid">
+                    <!-- 文件将在这里动态生成 -->
+                </div>
+                
+                <!-- 加载指示器 -->
+                <div class="loading-container" id="loadingIndicator" style="display: none;">
+                    <div class="loading-spinner"></div>
+                </div>
 
-    fetch('/metadata')
-        .then(r => r.json())
-        .then(data => {
-            if (data && data.folders) {
-                buildMenu(document.getElementById('menu'), data.folders, '视觉素材库');
+                <!-- 空状态 -->
+                <div class="empty-state" id="emptyState" style="display: none;">
+                    <i class="fas fa-folder-open"></i>
+                    <h3>文件夹为空</h3>
+                    <p>这个文件夹中没有任何文件</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="./style/js/bootstrap.bundle.min.js"></script>
+    
+    <script>
+        class FileExplorer {
+            constructor() {
+                this.currentPath = '';
+                this.offset = 0;
+                this.limit = 100;
+                this.loading = false;
+                this.hasMore = true;
+                this.searchQuery = '';
+                this.viewMode = 'grid';
+                this.files = [];
+                
+                this.init();
             }
+
+            init() {
+                this.bindEvents();
+                this.loadMetadata();
+                this.setupInfiniteScroll();
+            }
+
+            bindEvents() {
+                // 侧边栏切换
+                document.getElementById('sidebarToggle').addEventListener('click', () => {
+                    document.getElementById('sidebar').classList.toggle('show');
+                });
+
+                // 视图切换
+                document.getElementById('gridView').addEventListener('click', () => {
+                    this.setViewMode('grid');
+                });
+                
+                document.getElementById('listView').addEventListener('click', () => {
+                    this.setViewMode('list');
+                });
+
+                // 搜索
+                const searchInput = document.getElementById('searchInput');
+                let searchTimeout;
+                searchInput.addEventListener('input', (e) => {
+                    clearTimeout(searchTimeout);
+                    searchTimeout = setTimeout(() => {
+                        this.searchQuery = e.target.value.toLowerCase();
+                        this.filterFiles();
+                    }, 300);
+                });
+
+                // 点击空白处关闭侧边栏（移动端）
+                document.addEventListener('click', (e) => {
+                    const sidebar = document.getElementById('sidebar');
+                    const toggle = document.getElementById('sidebarToggle');
+                    
+                    if (window.innerWidth <= 768 && 
+                        !sidebar.contains(e.target) && 
+                        !toggle.contains(e.target) && 
+                        sidebar.classList.contains('show')) {
+                        sidebar.classList.remove('show');
+                    }
+                });
+            }
+
+            setViewMode(mode) {
+                this.viewMode = mode;
+                const gridBtn = document.getElementById('gridView');
+                const listBtn = document.getElementById('listView');
+                const filesGrid = document.getElementById('filesGrid');
+
+                if (mode === 'grid') {
+                    gridBtn.classList.add('active');
+                    listBtn.classList.remove('active');
+                    filesGrid.className = 'files-grid';
+                } else {
+                    listBtn.classList.add('active');
+                    gridBtn.classList.remove('active');
+                    filesGrid.className = 'files-list';
+                }
+            }
+
+            async loadMetadata() {
+                try {
+                    const response = await fetch('/metadata');
+                    const data = await response.json();
+                    
+                    if (data && data.folders) {
+                        this.buildFolderTree(data.folders);
+                    }
+                } catch (error) {
+                    console.error('加载元数据失败:', error);
+                }
+            }
+
+            buildFolderTree(folders, container = document.getElementById('folderTree'), basePath = '视觉素材库') {
+                const ul = document.createElement('ul');
+                
+                folders.forEach(folder => {
+                    const li = document.createElement('li');
+                    const folderPath = basePath + '/' + folder.name;
+                    
+                    const folderItem = document.createElement('div');
+                    folderItem.className = 'folder-item';
+                    folderItem.innerHTML = `
+                        <i class="fas fa-folder"></i>
+                        <span>${folder.name}</span>
+                    `;
+                    
+                    folderItem.addEventListener('click', () => {
+                        this.selectFolder(folderPath, folderItem);
+                        
+                        // 展开子文件夹
+                        if (folder.children && folder.children.length > 0) {
+                            let childContainer = li.querySelector('ul');
+                            if (!childContainer) {
+                                childContainer = document.createElement('ul');
+                                childContainer.style.paddingLeft = '20px';
+                                this.buildFolderTree(folder.children, childContainer, folderPath);
+                                li.appendChild(childContainer);
+                            }
+                        }
+                    });
+                    
+                    li.appendChild(folderItem);
+                    ul.appendChild(li);
+                });
+                
+                container.appendChild(ul);
+            }
+
+            selectFolder(path, element) {
+                // 更新活动状态
+                document.querySelectorAll('.folder-item').forEach(item => {
+                    item.classList.remove('active');
+                });
+                element.classList.add('active');
+
+                // 更新当前路径和面包屑
+                this.currentPath = path;
+                this.updateBreadcrumb();
+                
+                // 重置并加载文件
+                this.resetFiles();
+                this.loadFiles();
+
+                // 移动端关闭侧边栏
+                if (window.innerWidth <= 768) {
+                    document.getElementById('sidebar').classList.remove('show');
+                }
+            }
+
+            updateBreadcrumb() {
+                const breadcrumb = document.getElementById('breadcrumb');
+                const pathParts = this.currentPath.split('/').filter(part => part);
+                
+                breadcrumb.innerHTML = '';
+                
+                // 添加首页
+                const homeItem = document.createElement('li');
+                homeItem.className = 'breadcrumb-item';
+                homeItem.innerHTML = '<i class="fas fa-home"></i>';
+                breadcrumb.appendChild(homeItem);
+                
+                // 添加路径部分
+                pathParts.forEach((part, index) => {
+                    const item = document.createElement('li');
+                    item.className = index === pathParts.length - 1 ? 'breadcrumb-item active' : 'breadcrumb-item';
+                    item.textContent = part;
+                    breadcrumb.appendChild(item);
+                });
+            }
+
+            resetFiles() {
+                this.offset = 0;
+                this.hasMore = true;
+                this.files = [];
+                document.getElementById('filesGrid').innerHTML = '';
+                document.getElementById('emptyState').style.display = 'none';
+            }
+
+            async loadFiles() {
+                console.log('loadFiles被调用:', {
+                    loading: this.loading,
+                    hasMore: this.hasMore,
+                    currentPath: this.currentPath,
+                    offset: this.offset,
+                    limit: this.limit
+                });
+                
+                if (this.loading || !this.hasMore) {
+                    console.log('loadFiles提前返回:', { loading: this.loading, hasMore: this.hasMore });
+                    return;
+                }
+                
+                this.loading = true;
+                this.showLoading();
+                
+                try {
+                    const url = `/files?path=${encodeURIComponent(this.currentPath)}&offset=${this.offset}&limit=${this.limit}`;
+                    console.log('请求URL:', url);
+                    
+                    const response = await fetch(url);
+                    const fileList = await response.json();
+                    
+                    console.log('收到文件列表:', {
+                        length: fileList.length,
+                        files: fileList,
+                        currentOffset: this.offset
+                    });
+                    
+                    if (fileList.length === 0 && this.offset === 0) {
+                        this.showEmptyState();
+                    } else {
+                        fileList.forEach(fileName => {
+                            this.files.push(fileName);
+                            this.createFileCard(fileName);
+                        });
+                        
+                        if (fileList.length < this.limit) {
+                            this.hasMore = false;
+                            console.log('没有更多文件了，设置hasMore为false');
+                        } else {
+                            console.log('还有更多文件，继续保持hasMore为true');
+                        }
+                        
+                        this.offset += fileList.length;
+                        console.log('更新offset为:', this.offset);
+                    }
+                } catch (error) {
+                    console.error('加载文件失败:', error);
+                } finally {
+                    this.loading = false;
+                    this.hideLoading();
+                    console.log('loadFiles完成，loading设为false');
+                }
+            }
+
+            createFileCard(fileName) {
+                const filesGrid = document.getElementById('filesGrid');
+                const fileCard = document.createElement('div');
+                fileCard.className = 'file-card';
+                
+                const fileExtension = this.getFileExtension(fileName);
+                const fileType = this.getFileType(fileExtension);
+                
+                fileCard.innerHTML = `
+                    <div class="file-preview">
+                        ${this.createFilePreview(fileName, fileType)}
+                    </div>
+                    <div class="file-info">
+                        <div class="file-name" title="${fileName}">${fileName}</div>
+                        <div class="file-meta">
+                            <span class="file-type">${fileType.name}</span>
+                            <i class="fas fa-download" title="下载"></i>
+                        </div>
+                    </div>
+                `;
+                
+                // 添加点击事件
+                fileCard.addEventListener('click', () => {
+                    this.previewFile(fileName, fileType);
+                });
+                
+                filesGrid.appendChild(fileCard);
+            }
+
+            createFilePreview(fileName, fileType) {
+                const ext = this.getFileExtension(fileName);
+                // 对所有可能的图片格式都尝试显示图片
+                if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext)) {
+                    return `<img src="/image?id=${encodeURIComponent(fileName)}&thumbnail=true" 
+                                 alt="${fileName}" 
+                                 onload="console.log('图片加载成功:', '${fileName}')"
+                                 onerror="console.log('图片加载失败:', '${fileName}', this.src); this.style.display='none'; this.nextElementSibling.style.display='flex'">
+                            <div class="file-icon" style="display: none;">
+                                <i class="${fileType.icon}" style="color: ${fileType.color}"></i>
+                            </div>`;
+                } else {
+                    return `<div class="file-icon">
+                                <i class="${fileType.icon}" style="color: ${fileType.color}"></i>
+                            </div>`;
+                }
+            }
+
+            getFileExtension(fileName) {
+                const lastDot = fileName.lastIndexOf('.');
+                return lastDot > 0 ? fileName.substring(lastDot + 1).toLowerCase() : '';
+            }
+
+            getFileType(extension) {
+                const types = {
+                    // 图片
+                    'jpg': { name: '图片', icon: 'fas fa-image', color: '#10b981', category: 'image' },
+                    'jpeg': { name: '图片', icon: 'fas fa-image', color: '#10b981', category: 'image' },
+                    'png': { name: '图片', icon: 'fas fa-image', color: '#10b981', category: 'image' },
+                    'gif': { name: '图片', icon: 'fas fa-image', color: '#10b981', category: 'image' },
+                    'bmp': { name: '图片', icon: 'fas fa-image', color: '#10b981', category: 'image' },
+                    'webp': { name: '图片', icon: 'fas fa-image', color: '#10b981', category: 'image' },
+                    'svg': { name: '矢量图', icon: 'fas fa-vector-square', color: '#8b5cf6', category: 'image' },
+                    
+                    // 视频
+                    'mp4': { name: '视频', icon: 'fas fa-video', color: '#ef4444', category: 'video' },
+                    'avi': { name: '视频', icon: 'fas fa-video', color: '#ef4444', category: 'video' },
+                    'mov': { name: '视频', icon: 'fas fa-video', color: '#ef4444', category: 'video' },
+                    'wmv': { name: '视频', icon: 'fas fa-video', color: '#ef4444', category: 'video' },
+                    'flv': { name: '视频', icon: 'fas fa-video', color: '#ef4444', category: 'video' },
+                    'mkv': { name: '视频', icon: 'fas fa-video', color: '#ef4444', category: 'video' },
+                    
+                    // 音频
+                    'mp3': { name: '音频', icon: 'fas fa-music', color: '#f59e0b', category: 'audio' },
+                    'wav': { name: '音频', icon: 'fas fa-music', color: '#f59e0b', category: 'audio' },
+                    'flac': { name: '音频', icon: 'fas fa-music', color: '#f59e0b', category: 'audio' },
+                    'aac': { name: '音频', icon: 'fas fa-music', color: '#f59e0b', category: 'audio' },
+                    
+                    // 文档
+                    'pdf': { name: 'PDF', icon: 'fas fa-file-pdf', color: '#dc2626', category: 'document' },
+                    'doc': { name: 'Word', icon: 'fas fa-file-word', color: '#2563eb', category: 'document' },
+                    'docx': { name: 'Word', icon: 'fas fa-file-word', color: '#2563eb', category: 'document' },
+                    'xls': { name: 'Excel', icon: 'fas fa-file-excel', color: '#059669', category: 'document' },
+                    'xlsx': { name: 'Excel', icon: 'fas fa-file-excel', color: '#059669', category: 'document' },
+                    'ppt': { name: 'PowerPoint', icon: 'fas fa-file-powerpoint', color: '#ea580c', category: 'document' },
+                    'pptx': { name: 'PowerPoint', icon: 'fas fa-file-powerpoint', color: '#ea580c', category: 'document' },
+                    'txt': { name: '文本', icon: 'fas fa-file-alt', color: '#64748b', category: 'document' },
+                    
+                    // 压缩包
+                    'zip': { name: '压缩包', icon: 'fas fa-file-archive', color: '#7c3aed', category: 'archive' },
+                    'rar': { name: '压缩包', icon: 'fas fa-file-archive', color: '#7c3aed', category: 'archive' },
+                    '7z': { name: '压缩包', icon: 'fas fa-file-archive', color: '#7c3aed', category: 'archive' },
+                    
+                    // 代码
+                    'js': { name: 'JavaScript', icon: 'fab fa-js-square', color: '#f7df1e', category: 'code' },
+                    'html': { name: 'HTML', icon: 'fab fa-html5', color: '#e34f26', category: 'code' },
+                    'css': { name: 'CSS', icon: 'fab fa-css3-alt', color: '#1572b6', category: 'code' },
+                    'java': { name: 'Java', icon: 'fab fa-java', color: '#ed8b00', category: 'code' },
+                    'py': { name: 'Python', icon: 'fab fa-python', color: '#3776ab', category: 'code' },
+                };
+                
+                return types[extension] || { 
+                    name: '文件', 
+                    icon: 'fas fa-file', 
+                    color: '#64748b', 
+                    category: 'unknown' 
+                };
+            }
+
+            previewFile(fileName, fileType) {
+                const ext = this.getFileExtension(fileName);
+                // 对所有图片格式都支持预览
+                if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext)) {
+                    this.showImagePreview(fileName);
+                } else {
+                    console.log('预览文件:', fileName, fileType);
+                }
+            }
+
+            showImagePreview(fileName) {
+                // 创建模态框
+                const modal = document.createElement('div');
+                modal.className = 'modal fade';
+                modal.innerHTML = `
+                    <div class="modal-dialog modal-xl modal-dialog-centered">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title">${fileName}</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+                            <div class="modal-body text-center">
+                                <img src="/image?id=${encodeURIComponent(fileName)}&thumbnail=false" 
+                                     class="img-fluid" alt="${fileName}">
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                document.body.appendChild(modal);
+                const bsModal = new bootstrap.Modal(modal);
+                bsModal.show();
+                
+                // 模态框关闭后移除DOM元素
+                modal.addEventListener('hidden.bs.modal', () => {
+                    document.body.removeChild(modal);
+                });
+            }
+
+            filterFiles() {
+                const cards = document.querySelectorAll('.file-card');
+                let visibleCount = 0;
+                
+                cards.forEach(card => {
+                    const fileName = card.querySelector('.file-name').textContent.toLowerCase();
+                    const isVisible = fileName.includes(this.searchQuery);
+                    
+                    card.style.display = isVisible ? 'block' : 'none';
+                    if (isVisible) visibleCount++;
+                });
+                
+                // 显示空状态
+                const emptyState = document.getElementById('emptyState');
+                if (visibleCount === 0 && cards.length > 0) {
+                    emptyState.style.display = 'block';
+                    emptyState.innerHTML = `
+                        <i class="fas fa-search"></i>
+                        <h3>未找到匹配的文件</h3>
+                        <p>尝试使用不同的关键词搜索</p>
+                    `;
+                } else {
+                    emptyState.style.display = 'none';
+                }
+            }
+
+            setupInfiniteScroll() {
+                const filesContainer = document.querySelector('.files-container');
+                
+                // 添加滚动事件监听
+                filesContainer.addEventListener('scroll', () => {
+                    const scrollTop = filesContainer.scrollTop;
+                    const scrollHeight = filesContainer.scrollHeight;
+                    const clientHeight = filesContainer.clientHeight;
+                    
+                    // 当滚动到距离底部200px时就开始加载
+                    if (scrollTop + clientHeight >= scrollHeight - 200) {
+                        console.log('触发无限滚动:', {
+                            scrollTop, 
+                            clientHeight, 
+                            scrollHeight, 
+                            offset: this.offset,
+                            loading: this.loading,
+                            hasMore: this.hasMore,
+                            currentPath: this.currentPath
+                        });
+                        
+                        // 确保有路径且不在加载中且还有更多数据
+                        if (this.currentPath && !this.loading && this.hasMore) {
+                            console.log('开始加载更多文件...');
+                            this.loadFiles();
+                        }
+                    }
+                });
+                
+                // 也监听window的滚动事件作为备选
+                window.addEventListener('scroll', () => {
+                    const windowHeight = window.innerHeight;
+                    const documentHeight = document.documentElement.scrollHeight;
+                    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+                    
+                    if (scrollTop + windowHeight >= documentHeight - 200) {
+                        console.log('触发窗口无限滚动:', {
+                            windowHeight,
+                            documentHeight,
+                            scrollTop,
+                            offset: this.offset,
+                            loading: this.loading,
+                            hasMore: this.hasMore,
+                            currentPath: this.currentPath
+                        });
+                        
+                        if (this.currentPath && !this.loading && this.hasMore) {
+                            console.log('通过窗口滚动加载更多文件...');
+                            this.loadFiles();
+                        }
+                    }
+                });
+            }
+
+            showLoading() {
+                document.getElementById('loadingIndicator').style.display = 'flex';
+            }
+
+            hideLoading() {
+                document.getElementById('loadingIndicator').style.display = 'none';
+            }
+
+            showEmptyState() {
+                document.getElementById('emptyState').style.display = 'block';
+            }
+        }
+
+        // 初始化应用
+        document.addEventListener('DOMContentLoaded', () => {
+            new FileExplorer();
         });
-</script>
+    </script>
 </body>
 </html>
