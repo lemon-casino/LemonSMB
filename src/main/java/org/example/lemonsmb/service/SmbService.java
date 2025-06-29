@@ -41,14 +41,82 @@ public class SmbService {
     private StringRedisTemplate redisTemplate;
 
     private final ObjectMapper mapper = new ObjectMapper();
-
     private JsonNode metadataRoot;
     private JsonNode fileIndex;
 
-    private byte[] readBytes(String remotePath) throws IOException {
+    @FunctionalInterface
+    private interface ShareCallback<T> {
+        T apply(DiskShare share) throws IOException;
+    }
+
+    private <T> T withShare(ShareCallback<T> cb) throws IOException {
+        SMBClient client = new SMBClient();
+        Connection connection = null;
+        Session session = null;
         DiskShare share = null;
         try {
-            share = connectShare();
+            connection = client.connect(properties.getHost());
+            AuthenticationContext auth = new AuthenticationContext(
+                    properties.getUsername(),
+                    properties.getPassword().toCharArray(),
+                    null);
+            session = connection.authenticate(auth);
+            share = (DiskShare) session.connectShare(properties.getShare());
+            return cb.apply(share);
+        } catch (com.hierynomus.mssmb2.SMBApiException e) {
+            throw new IOException(e);
+        } finally {
+            closeSafely(share, session, connection, client);
+        }
+    }
+
+    private void closeSafely(DiskShare share, Session session,
+                             Connection connection, SMBClient client) {
+        if (share != null) {
+            try {
+                share.close();
+            } catch (TransportException | SMBRuntimeException e) {
+                forceClose(connection);
+            } catch (Exception ignore) {
+            }
+        }
+        if (session != null) {
+            try {
+                session.close();
+            } catch (Exception ignore) {
+                forceClose(connection);
+            }
+        }
+        if (connection != null) {
+            try {
+                connection.close();
+            } catch (Exception ignore) {
+                forceClose(connection);
+            }
+        }
+        if (client != null) {
+            try {
+                client.close();
+            } catch (Exception ignore) {
+            }
+        } catch (com.hierynomus.mssmb2.SMBApiException e) {
+            throw new IOException(e);
+        } finally {
+            safeClose(share);
+        }
+    }
+
+    private void forceClose(Connection connection) {
+        if (connection != null) {
+            try {
+                connection.close(true);
+            } catch (Exception ignore) {
+            }
+        }
+    }
+
+    private byte[] readBytes(String remotePath) throws IOException {
+        return withShare(share -> {
             File f = share.openFile(remotePath,
                     EnumSet.of(AccessMask.GENERIC_READ),
                     null,
@@ -58,11 +126,7 @@ public class SmbService {
             try (InputStream is = f.getInputStream()) {
                 return is.readAllBytes();
             }
-        } catch (com.hierynomus.mssmb2.SMBApiException e) {
-            throw new IOException(e);
-        } finally {
-            safeClose(share);
-        }
+        });
     }
 
     @Async
@@ -184,18 +248,17 @@ public class SmbService {
             info.setPath(filePath);
             
             // 尝试获取实际文件大小
-            DiskShare share = null;
             try {
-                share = connectShare();
-                com.hierynomus.msfscc.fileinformation.FileStandardInformation fileStdInfo =
-                    share.getFileInformation(filePath).getStandardInformation();
-                if (fileStdInfo != null) {
-                    info.setSize(fileStdInfo.getEndOfFile());
-                }
+                withShare(s -> {
+                    com.hierynomus.msfscc.fileinformation.FileStandardInformation fileStdInfo =
+                        s.getFileInformation(filePath).getStandardInformation();
+                    if (fileStdInfo != null) {
+                        info.setSize(fileStdInfo.getEndOfFile());
+                    }
+                    return null;
+                });
             } catch (Exception e) {
                 // 如果获取文件信息失败，使用元数据中的信息
-            } finally {
-                safeClose(share);
             }
             
             return CompletableFuture.completedFuture(info);
@@ -215,14 +278,6 @@ public class SmbService {
         return properties;
     }
 
-    private DiskShare connectShare() throws IOException {
-        SMBClient client = new SMBClient();
-        Connection connection = client.connect(properties.getHost());
-        AuthenticationContext auth = new AuthenticationContext(
-                properties.getUsername(), properties.getPassword().toCharArray(), null);
-        Session session = connection.authenticate(auth);
-        return (DiskShare) session.connectShare(properties.getShare());
-    }
 
     /**
      * Safely close a DiskShare, forcing the connection closed when a timeout occurs
@@ -249,9 +304,7 @@ public class SmbService {
      * Read a file from the SMB share using UTF-8 encoding.
      */
     public String readFile(String remotePath) throws IOException {
-        DiskShare share = null;
-        try {
-            share = connectShare();
+        return withShare(share -> {
             File f = share.openFile(remotePath,
                     EnumSet.of(AccessMask.GENERIC_READ),
                     null,
@@ -261,12 +314,7 @@ public class SmbService {
             try (InputStream is = f.getInputStream()) {
                 return new String(is.readAllBytes(), StandardCharsets.UTF_8);
             }
-        } catch (com.hierynomus.mssmb2.SMBApiException e) {
-            // Wrap SMB errors so callers can handle uniformly
-            throw new IOException(e);
-        } finally {
-            safeClose(share);
-        }
+        });
     }
 
     /**
