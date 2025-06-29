@@ -93,6 +93,10 @@ public class SmbService {
                 client.close();
             } catch (Exception ignore) {
             }
+        } catch (com.hierynomus.mssmb2.SMBApiException e) {
+            throw new IOException(e);
+        } finally {
+            safeClose(share);
         }
     }
 
@@ -268,6 +272,27 @@ public class SmbService {
         return properties;
     }
 
+
+    /**
+     * Safely close a DiskShare, forcing the connection closed when a timeout occurs
+     * during the normal logoff procedure.
+     */
+    private void safeClose(DiskShare share) {
+        if (share == null) {
+            return;
+        }
+        try {
+            share.close();
+        } catch (TransportException | SMBRuntimeException e) {
+            try {
+                share.getTreeConnect().getSession().getConnection().close(true);
+            } catch (Exception ignore) {
+                // swallow all exceptions during forced close
+            }
+        } catch (Exception ignore) {
+            // swallow any other closing issues
+        }
+    }
 
     /**
      * Read a file from the SMB share using UTF-8 encoding.
