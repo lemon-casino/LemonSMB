@@ -37,7 +37,6 @@ public class SmbService {
     private SmbProperties properties;
 
     private final ObjectMapper mapper = new ObjectMapper();
-    private JsonNode metadataCache;
 
     private byte[] readBytes(String remotePath) throws IOException {
         DiskShare share = null;
@@ -267,14 +266,10 @@ public class SmbService {
     public CompletableFuture<List<FileEntry>> listFiles(String path, int offset, int limit) {
         List<FileEntry> result = new ArrayList<>();
         try {
-            if (metadataCache == null) {
-                String meta = readFile(properties.getLibraryDir() + "/metadata.json");
-                metadataCache = mapper.readTree(meta).path("folders");
-            }
-
             String folderId = null;
             if (path != null && !path.isEmpty()) {
-                folderId = findFolderId(metadataCache, path.split("/"), 0);
+                // 'path' now represents the folder's ID directly rather than a hierarchical name
+                folderId = path;
             }
 
             String imagesBase = properties.getLibraryDir() + "/images";
@@ -330,23 +325,10 @@ public class SmbService {
                 safeClose(share);
             }
         } catch (IOException e) {
-            result.add("ERROR:" + e.getMessage());
+            // Log the error but still return the files that were collected
+            System.err.println("Failed to list files: " + e.getMessage());
         }
         return CompletableFuture.completedFuture(result);
     }
 
-    private String findFolderId(JsonNode folders, String[] names, int index) {
-        if (folders == null || index >= names.length) {
-            return null;
-        }
-        for (JsonNode folder : folders) {
-            if (names[index].equals(folder.path("name").asText())) {
-                if (index == names.length - 1) {
-                    return folder.path("id").asText();
-                }
-                return findFolderId(folder.path("children"), names, index + 1);
-            }
-        }
-        return null;
-    }
 }
