@@ -10,6 +10,8 @@ import com.hierynomus.smbj.connection.Connection;
 import com.hierynomus.smbj.session.Session;
 import com.hierynomus.smbj.share.DiskShare;
 import com.hierynomus.smbj.share.File;
+import com.hierynomus.protocol.transport.TransportException;
+import com.hierynomus.smbj.common.SMBRuntimeException;
 import org.example.lemonsmb.config.SmbProperties;
 import org.example.lemonsmb.model.FileInfo;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -36,22 +38,85 @@ public class SmbService {
     private final ObjectMapper mapper = new ObjectMapper();
     private JsonNode metadataCache;
 
-    private byte[] readBytes(String remotePath) throws IOException {
-        try (DiskShare share = connectShare()) {
+    @FunctionalInterface
+    private interface ShareCallback<T> {
+        T apply(DiskShare share) throws IOException;
+    }
+
+    private <T> T withShare(ShareCallback<T> cb) throws IOException {
+        SMBClient client = new SMBClient();
+        Connection connection = null;
+        Session session = null;
+        DiskShare share = null;
+        try {
+            connection = client.connect(properties.getHost());
+            AuthenticationContext auth = new AuthenticationContext(
+                    properties.getUsername(),
+                    properties.getPassword().toCharArray(),
+                    null);
+            session = connection.authenticate(auth);
+            share = (DiskShare) session.connectShare(properties.getShare());
+            return cb.apply(share);
+        } catch (com.hierynomus.mssmb2.SMBApiException e) {
+            throw new IOException(e);
+        } finally {
+            closeSafely(share, session, connection, client);
+        }
+    }
+
+    private void closeSafely(DiskShare share, Session session,
+                             Connection connection, SMBClient client) {
+        if (share != null) {
             try {
-                File f = share.openFile(remotePath,
-                        EnumSet.of(AccessMask.GENERIC_READ),
-                        null,
-                        SMB2ShareAccess.ALL,
-                        SMB2CreateDisposition.FILE_OPEN,
-                        null);
-                try (InputStream is = f.getInputStream()) {
-                    return is.readAllBytes();
-                }
-            } catch (com.hierynomus.mssmb2.SMBApiException e) {
-                throw new IOException(e);
+                share.close();
+            } catch (TransportException | SMBRuntimeException e) {
+                forceClose(connection);
+            } catch (Exception ignore) {
             }
         }
+        if (session != null) {
+            try {
+                session.close();
+            } catch (Exception ignore) {
+                forceClose(connection);
+            }
+        }
+        if (connection != null) {
+            try {
+                connection.close();
+            } catch (Exception ignore) {
+                forceClose(connection);
+            }
+        }
+        if (client != null) {
+            try {
+                client.close();
+            } catch (Exception ignore) {
+            }
+        }
+    }
+
+    private void forceClose(Connection connection) {
+        if (connection != null) {
+            try {
+                connection.close(true);
+            } catch (Exception ignore) {
+            }
+        }
+    }
+
+    private byte[] readBytes(String remotePath) throws IOException {
+        return withShare(share -> {
+            File f = share.openFile(remotePath,
+                    EnumSet.of(AccessMask.GENERIC_READ),
+                    null,
+                    SMB2ShareAccess.ALL,
+                    SMB2CreateDisposition.FILE_OPEN,
+                    null);
+            try (InputStream is = f.getInputStream()) {
+                return is.readAllBytes();
+            }
+        });
     }
 
     @Async
@@ -173,18 +238,17 @@ public class SmbService {
             info.setPath(filePath);
             
             // 尝试获取实际文件大小
-            try (DiskShare share = connectShare()) {
-                try {
-                    com.hierynomus.msfscc.fileinformation.FileStandardInformation fileStdInfo = 
-                        share.getFileInformation(filePath).getStandardInformation();
+            try {
+                withShare(s -> {
+                    com.hierynomus.msfscc.fileinformation.FileStandardInformation fileStdInfo =
+                        s.getFileInformation(filePath).getStandardInformation();
                     if (fileStdInfo != null) {
                         info.setSize(fileStdInfo.getEndOfFile());
                     }
-                } catch (Exception e) {
-                    // 如果获取文件信息失败，使用元数据中的信息
-                }
+                    return null;
+                });
             } catch (Exception e) {
-                // 如果连接失败，使用元数据中的信息
+                // 如果获取文件信息失败，使用元数据中的信息
             }
             
             return CompletableFuture.completedFuture(info);
@@ -204,35 +268,22 @@ public class SmbService {
         return properties;
     }
 
-    private DiskShare connectShare() throws IOException {
-        SMBClient client = new SMBClient();
-        Connection connection = client.connect(properties.getHost());
-        AuthenticationContext auth = new AuthenticationContext(
-                properties.getUsername(), properties.getPassword().toCharArray(), null);
-        Session session = connection.authenticate(auth);
-        return (DiskShare) session.connectShare(properties.getShare());
-    }
 
     /**
      * Read a file from the SMB share using UTF-8 encoding.
      */
     public String readFile(String remotePath) throws IOException {
-        try (DiskShare share = connectShare()) {
-            try {
-                File f = share.openFile(remotePath,
-                        EnumSet.of(AccessMask.GENERIC_READ),
-                        null,
-                        SMB2ShareAccess.ALL,
-                        SMB2CreateDisposition.FILE_OPEN,
-                        null);
-                try (InputStream is = f.getInputStream()) {
-                    return new String(is.readAllBytes(), StandardCharsets.UTF_8);
-                }
-            } catch (com.hierynomus.mssmb2.SMBApiException e) {
-                // Wrap SMB errors so callers can handle uniformly
-                throw new IOException(e);
+        return withShare(share -> {
+            File f = share.openFile(remotePath,
+                    EnumSet.of(AccessMask.GENERIC_READ),
+                    null,
+                    SMB2ShareAccess.ALL,
+                    SMB2CreateDisposition.FILE_OPEN,
+                    null);
+            try (InputStream is = f.getInputStream()) {
+                return new String(is.readAllBytes(), StandardCharsets.UTF_8);
             }
-        }
+        });
     }
 
     @Async
@@ -250,7 +301,7 @@ public class SmbService {
             }
 
             String imagesBase = properties.getLibraryDir() + "/images";
-            try (DiskShare share = connectShare()) {
+            withShare(share -> {
                 int processed = 0;
                 for (FileIdBothDirectoryInformation f : share.list(imagesBase)) {
                     if (!f.getFileName().endsWith(".info")) {
@@ -293,7 +344,8 @@ public class SmbService {
 
                     }
                 }
-            }
+                return null;
+            });
         } catch (IOException e) {
             result.add("ERROR:" + e.getMessage());
         }
