@@ -14,6 +14,7 @@ import com.hierynomus.protocol.transport.TransportException;
 import com.hierynomus.smbj.common.SMBRuntimeException;
 import org.example.lemonsmb.config.SmbProperties;
 import org.example.lemonsmb.model.FileInfo;
+import org.example.lemonsmb.model.FileEntry;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -263,8 +264,8 @@ public class SmbService {
     }
 
     @Async
-    public CompletableFuture<List<String>> listFiles(String path, int offset, int limit) {
-        List<String> result = new ArrayList<>();
+    public CompletableFuture<List<FileEntry>> listFiles(String path, int offset, int limit) {
+        List<FileEntry> result = new ArrayList<>();
         try {
             if (metadataCache == null) {
                 String meta = readFile(properties.getLibraryDir() + "/metadata.json");
@@ -312,7 +313,10 @@ public class SmbService {
                             if (processed++ < offset) {
                                 continue;
                             }
-                            result.add(imageId + "." + node.path("ext").asText());
+                            String ext = node.path("ext").asText();
+                            String fileName = node.path("name").asText() + "." + ext;
+                            String id = imageId + "." + ext;
+                            result.add(new FileEntry(id, fileName));
                             if (result.size() >= limit) {
                                 break;
                             }

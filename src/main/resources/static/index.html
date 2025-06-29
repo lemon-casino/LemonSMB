@@ -693,9 +693,9 @@
                     if (fileList.length === 0 && this.offset === 0) {
                         this.showEmptyState();
                     } else {
-                        fileList.forEach(fileName => {
-                            this.files.push(fileName);
-                            this.createFileCard(fileName);
+                        fileList.forEach(file => {
+                            this.files.push(file);
+                            this.createFileCard(file);
                         });
                         
                         if (fileList.length < this.limit) {
@@ -717,17 +717,19 @@
                 }
             }
 
-            createFileCard(fileName) {
+            createFileCard(file) {
                 const filesGrid = document.getElementById('filesGrid');
                 const fileCard = document.createElement('div');
                 fileCard.className = 'file-card';
-                
+
+                const fileName = file.name;
+                const fileId = file.id;
                 const fileExtension = this.getFileExtension(fileName);
                 const fileType = this.getFileType(fileExtension);
-                
+
                 fileCard.innerHTML = `
                     <div class="file-preview">
-                        ${this.createFilePreview(fileName, fileType)}
+                        ${this.createFilePreview(fileId, fileName, fileType)}
                     </div>
                     <div class="file-info">
                         <div class="file-name" title="${fileName}">${fileName}</div>
@@ -740,17 +742,17 @@
                 
                 // 添加点击事件
                 fileCard.addEventListener('click', () => {
-                    this.previewFile(fileName, fileType);
+                    this.previewFile(fileId, fileName, fileType);
                 });
                 
                 filesGrid.appendChild(fileCard);
             }
 
-            createFilePreview(fileName, fileType) {
+            createFilePreview(fileId, fileName, fileType) {
                 const ext = this.getFileExtension(fileName);
                 // 对所有可能的图片格式都尝试显示图片
                 if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext)) {
-                    return `<img src="/image?id=${encodeURIComponent(fileName)}&thumbnail=true" 
+                    return `<img src="/image?id=${encodeURIComponent(fileId)}&thumbnail=true" 
                                  alt="${fileName}" 
                                  onload="console.log('图片加载成功:', '${fileName}')"
                                  onerror="console.log('图片加载失败:', '${fileName}', this.src); this.style.display='none'; this.nextElementSibling.style.display='flex'">
@@ -825,17 +827,17 @@
                 };
             }
 
-            previewFile(fileName, fileType) {
+            previewFile(fileId, fileName, fileType) {
                 const ext = this.getFileExtension(fileName);
                 // 对所有图片格式都支持预览
                 if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext)) {
-                    this.showImagePreview(fileName);
+                    this.showImagePreview(fileId, fileName);
                 } else {
                     console.log('预览文件:', fileName, fileType);
                 }
             }
 
-            showImagePreview(fileName) {
+            showImagePreview(fileId, fileName) {
                 // 创建模态框
                 const modal = document.createElement('div');
                 modal.className = 'modal fade';
@@ -847,7 +849,7 @@
                                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                             </div>
                             <div class="modal-body text-center">
-                                <img src="/image?id=${encodeURIComponent(fileName)}&thumbnail=false" 
+                                <img src="/image?id=${encodeURIComponent(fileId)}&thumbnail=false" 
                                      class="img-fluid" alt="${fileName}">
                             </div>
                         </div>
