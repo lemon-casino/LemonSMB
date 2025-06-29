@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import org.example.lemonsmb.model.FileEntry;
 import java.util.concurrent.CompletableFuture;
 
 @RestController
@@ -35,7 +36,7 @@ public class FileController {
      * 获取文件列表
      */
     @GetMapping("/files")
-    public CompletableFuture<List<String>> list(
+    public CompletableFuture<List<FileEntry>> list(
             @RequestParam(defaultValue = "") String path,
             @RequestParam(defaultValue = "0") int offset,
             @RequestParam(defaultValue = "20") int limit) {
