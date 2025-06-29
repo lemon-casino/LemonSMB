@@ -34,6 +34,9 @@ public class FileController {
 
     /**
      * 获取文件列表
+     * <p>
+     * <code>path</code> 参数应为 {@code metadata.json} 中对应目录的 <strong>id</strong>，
+     * 而非层级名称。
      */
     @GetMapping("/files")
     public CompletableFuture<List<FileEntry>> list(
