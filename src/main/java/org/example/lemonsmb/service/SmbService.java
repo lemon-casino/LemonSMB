@@ -20,6 +20,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -36,8 +37,13 @@ public class SmbService {
     @Autowired
     private SmbProperties properties;
 
+    @Autowired
+    private StringRedisTemplate redisTemplate;
+
     private final ObjectMapper mapper = new ObjectMapper();
-    private JsonNode metadataCache;
+
+    private JsonNode metadataRoot;
+    private JsonNode fileIndex;
 
     private byte[] readBytes(String remotePath) throws IOException {
         DiskShare share = null;
@@ -263,90 +269,68 @@ public class SmbService {
         }
     }
 
+    /**
+     * Ensure the library metadata has been loaded into memory.
+     */
+    private synchronized void ensureMetadata() throws IOException {
+        if (metadataRoot == null) {
+            String json = redisTemplate.opsForValue().get("metadata");
+            if (json == null || json.isEmpty()) {
+                String base = properties.getLibraryDir();
+                json = readFile(base + "/metadata.json");
+            }
+            if (json != null) {
+                metadataRoot = mapper.readTree(json);
+                fileIndex = metadataRoot.path("files");
+            } else {
+                metadataRoot = mapper.createObjectNode();
+                fileIndex = mapper.createArrayNode();
+            }
+        }
+    }
+
     @Async
     public CompletableFuture<List<FileEntry>> listFiles(String path, int offset, int limit) {
         List<FileEntry> result = new ArrayList<>();
         try {
-            if (metadataCache == null) {
-                String meta = readFile(properties.getLibraryDir() + "/metadata.json");
-                metadataCache = mapper.readTree(meta).path("folders");
-            }
+            ensureMetadata();
 
-            String folderId = null;
-            if (path != null && !path.isEmpty()) {
-                folderId = findFolderId(metadataCache, path.split("/"), 0);
-            }
+            String folderId = (path != null && !path.isEmpty()) ? path : null;
+            int processed = 0;
 
-            String imagesBase = properties.getLibraryDir() + "/images";
-            DiskShare share = null;
-            try {
-                share = connectShare();
-                int processed = 0;
-                for (FileIdBothDirectoryInformation f : share.list(imagesBase)) {
-                    if (!f.getFileName().endsWith(".info")) {
-                        continue;
-                    }
-                    String imageId = f.getFileName().replace(".info", "");
-                    String metaPath = imagesBase + "/" + f.getFileName() + "/metadata.json";
-                    try (File mf = share.openFile(metaPath,
-                            EnumSet.of(AccessMask.GENERIC_READ),
-                            null,
-                            SMB2ShareAccess.ALL,
-                            SMB2CreateDisposition.FILE_OPEN,
-                            null);
-                         InputStream is = mf.getInputStream()) {
-                        String imgMeta = new String(is.readAllBytes(), StandardCharsets.UTF_8);
-                        JsonNode node = mapper.readTree(imgMeta);
-                        boolean match = folderId == null;
-                        if (folderId != null) {
-                            JsonNode arr = node.path("folders");
-                            if (arr.isArray()) {
-                                for (JsonNode n : arr) {
-                                    if (folderId.equals(n.asText())) {
-                                        match = true;
-                                        break;
-                                    }
+            if (fileIndex != null && fileIndex.isArray()) {
+                for (JsonNode file : fileIndex) {
+                    boolean match = folderId == null;
+                    if (folderId != null) {
+                        JsonNode arr = file.path("folders");
+                        if (arr.isArray()) {
+                            for (JsonNode n : arr) {
+                                if (folderId.equals(n.asText())) {
+                                    match = true;
+                                    break;
                                 }
                             }
                         }
-                        if (match) {
-                            if (processed++ < offset) {
-                                continue;
-                            }
-                            String ext = node.path("ext").asText();
-                            String fileName = node.path("name").asText() + "." + ext;
-                            String id = imageId + "." + ext;
-                            result.add(new FileEntry(id, fileName));
-                            if (result.size() >= limit) {
-                                break;
-                            }
+                    }
+                    if (match) {
+                        if (processed++ < offset) {
+                            continue;
                         }
-                    } catch (IOException | com.hierynomus.mssmb2.SMBApiException e) {
-                        // Skip files without metadata or inaccessible entries
-
+                        String imageId = file.path("id").asText();
+                        String ext = file.path("ext").asText();
+                        String name = file.path("name").asText() + "." + ext;
+                        String id = imageId + "." + ext;
+                        result.add(new FileEntry(id, name));
+                        if (result.size() >= limit) {
+                            break;
+                        }
                     }
                 }
-            } finally {
-                safeClose(share);
             }
         } catch (IOException e) {
-            result.add("ERROR:" + e.getMessage());
+            System.err.println("Failed to list files: " + e.getMessage());
         }
         return CompletableFuture.completedFuture(result);
     }
 
-    private String findFolderId(JsonNode folders, String[] names, int index) {
-        if (folders == null || index >= names.length) {
-            return null;
-        }
-        for (JsonNode folder : folders) {
-            if (names[index].equals(folder.path("name").asText())) {
-                if (index == names.length - 1) {
-                    return folder.path("id").asText();
-                }
-                return findFolderId(folder.path("children"), names, index + 1);
-            }
-        }
-        return null;
-    }
 }

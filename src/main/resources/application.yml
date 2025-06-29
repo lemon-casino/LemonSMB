@@ -2,6 +2,9 @@ server:
   port: 8080
 
 spring:
+  mvc:
+    async:
+      request-timeout: 120000
   thymeleaf:
     cache: true
     check-template: true
