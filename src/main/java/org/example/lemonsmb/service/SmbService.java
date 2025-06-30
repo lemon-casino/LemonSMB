@@ -318,7 +318,13 @@ public class SmbService {
                     }
                     return CompletableFuture.completedFuture(result);
                 }
-                folderId = findFolderId(metadataCache, path.split("/"), 0);
+
+                // Redis 中不存在索引时，进一步判断是否为文件夹 ID
+                if (!path.contains("/")) {
+                    folderId = path;
+                } else {
+                    folderId = findFolderId(metadataCache, path.split("/"), 0);
+                }
             }
 
             String imagesBase = properties.getLibraryDir() + "/images";
