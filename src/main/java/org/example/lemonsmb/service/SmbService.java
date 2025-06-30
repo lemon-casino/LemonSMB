@@ -22,6 +22,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import java.time.Duration;
 
 import java.io.IOException;
@@ -31,6 +32,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 @Service
 public class SmbService {
@@ -41,6 +43,9 @@ public class SmbService {
     @Autowired
     @Qualifier("byteRedisTemplate")
     private RedisTemplate<String, byte[]> byteRedisTemplate;
+
+    @Autowired
+    private StringRedisTemplate redisTemplate;
 
     private final ObjectMapper mapper = new ObjectMapper();
     private JsonNode metadataCache;
@@ -353,6 +358,54 @@ public class SmbService {
             System.out.println("----------》e"+e);
         }
         return CompletableFuture.completedFuture(result);
+    }
+
+    /**
+     * Index all image metadata and store folder relations in Redis.
+     */
+    public void indexLibrary() {
+        String imagesBase = properties.getLibraryDir() + "/images";
+        DiskShare share = null;
+        try {
+            // clean previous folder mappings
+            Set<String> keys = redisTemplate.keys("folder:*");
+            if (keys != null && !keys.isEmpty()) {
+                redisTemplate.delete(keys);
+            }
+            share = connectShare();
+            for (FileIdBothDirectoryInformation f : share.list(imagesBase)) {
+                if (!f.getFileName().endsWith(".info")) {
+                    continue;
+                }
+                String imageId = f.getFileName().replace(".info", "");
+                String metaPath = imagesBase + "/" + f.getFileName() + "/metadata.json";
+                try (File mf = share.openFile(metaPath,
+                        EnumSet.of(AccessMask.GENERIC_READ),
+                        null,
+                        SMB2ShareAccess.ALL,
+                        SMB2CreateDisposition.FILE_OPEN,
+                        null);
+                     InputStream is = mf.getInputStream()) {
+                    String imgMeta = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+                    JsonNode node = mapper.readTree(imgMeta);
+                    String ext = node.path("ext").asText();
+                    String fullId = imageId + "." + ext;
+                    redisTemplate.opsForValue().set("meta:" + fullId, imgMeta);
+                    JsonNode arr = node.path("folders");
+                    if (arr.isArray()) {
+                        for (JsonNode n : arr) {
+                            redisTemplate.opsForList().rightPush("folder:" + n.asText(), fullId);
+                        }
+                    }
+                } catch (IOException | com.hierynomus.mssmb2.SMBApiException e) {
+                    // skip problematic file
+                }
+            }
+        } catch (IOException e) {
+            // ignore indexing failures
+        } finally {
+            safeClose(share);
+        }
     }
 
     private String findFolderId(JsonNode folders, String[] names, int index) {

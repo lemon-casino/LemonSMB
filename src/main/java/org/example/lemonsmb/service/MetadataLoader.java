@@ -29,5 +29,8 @@ public class MetadataLoader {
             redisTemplate.opsForValue().set("mtime", mtime);
         } catch (IOException ignored) {
         }
+
+        // Build folder to image index for fast lookup
+        smbService.indexLibrary();
     }
 }
