@@ -299,6 +299,25 @@ public class SmbService {
 
             String folderId = null;
             if (path != null && !path.isEmpty()) {
+                // 如果Redis中存在该ID的索引，直接使用
+                if (Boolean.TRUE.equals(redisTemplate.hasKey("folder:" + path))) {
+                    List<String> ids = redisTemplate.opsForList().range("folder:" + path, offset, offset + limit - 1);
+                    if (ids != null) {
+                        for (String fid : ids) {
+                            String meta = redisTemplate.opsForValue().get("meta:" + fid);
+                            String name = fid;
+                            if (meta != null) {
+                                try {
+                                    JsonNode node = mapper.readTree(meta);
+                                    name = node.path("name").asText() + "." + node.path("ext").asText();
+                                } catch (IOException ignore) {
+                                }
+                            }
+                            result.add(new FileEntry(fid, name));
+                        }
+                    }
+                    return CompletableFuture.completedFuture(result);
+                }
                 folderId = findFolderId(metadataCache, path.split("/"), 0);
             }
 
