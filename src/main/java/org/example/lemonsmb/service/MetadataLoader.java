@@ -21,13 +21,28 @@ public class MetadataLoader {
         String base = smbService.getProperties().getLibraryDir();
         try {
             String metadata = smbService.readFile(base + "/metadata.json");
-            redisTemplate.opsForValue().set("metadata", metadata);
+            try {
+                redisTemplate.opsForValue().set("metadata", metadata);
+            } catch (Exception ignore) {
+                // redis unavailable
+            }
         } catch (IOException ignored) {
         }
         try {
             String mtime = smbService.readFile(base + "/mtime.json");
-            redisTemplate.opsForValue().set("mtime", mtime);
+            try {
+                redisTemplate.opsForValue().set("mtime", mtime);
+            } catch (Exception ignore) {
+                // redis unavailable
+            }
         } catch (IOException ignored) {
+        }
+
+        // Build folder to image index for fast lookup
+        try {
+            smbService.indexLibrary();
+        } catch (Exception ignore) {
+            // ignore indexing failures
         }
     }
 }
