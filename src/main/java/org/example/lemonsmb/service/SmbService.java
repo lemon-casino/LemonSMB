@@ -322,7 +322,6 @@ public class SmbService {
                 } catch (Exception e) {
                     // Redis unavailable, fall back to SMB search
                 }
-
                 // Redis 中不存在索引时，进一步判断是否为文件夹 ID
                 if (!path.contains("/")) {
                     folderId = path;
