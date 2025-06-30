@@ -274,7 +274,11 @@ public class SmbService {
 
             String folderId = null;
             if (path != null && !path.isEmpty()) {
-                folderId = findFolderId(metadataCache, path.split("/"), 0);
+                if (containsFolderId(metadataCache, path)) {
+                    folderId = path;
+                } else {
+                    folderId = findFolderId(metadataCache, path.split("/"), 0);
+                }
             }
 
             String imagesBase = properties.getLibraryDir() + "/images";
@@ -348,5 +352,20 @@ public class SmbService {
             }
         }
         return null;
+    }
+
+    private boolean containsFolderId(JsonNode folders, String id) {
+        if (folders == null) {
+            return false;
+        }
+        for (JsonNode folder : folders) {
+            if (id.equals(folder.path("id").asText())) {
+                return true;
+            }
+            if (containsFolderId(folder.path("children"), id)) {
+                return true;
+            }
+        }
+        return false;
     }
 }
