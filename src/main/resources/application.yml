@@ -20,7 +20,7 @@ spring:
     database: 2
 
 smb:
-  host: 183.134.170.168
+  host: 192.168.3.17
   username: admin
   password: admin
   share: DATA
