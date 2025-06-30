@@ -18,8 +18,11 @@ import org.example.lemonsmb.config.SmbProperties;
 import org.example.lemonsmb.model.FileEntry;
 import org.example.lemonsmb.model.FileInfo;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.data.redis.core.RedisTemplate;
+import java.time.Duration;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -34,6 +37,10 @@ public class SmbService {
 
     @Autowired
     private SmbProperties properties;
+
+    @Autowired
+    @Qualifier("byteRedisTemplate")
+    private RedisTemplate<String, byte[]> byteRedisTemplate;
 
     private final ObjectMapper mapper = new ObjectMapper();
     private JsonNode metadataCache;
@@ -60,6 +67,11 @@ public class SmbService {
 
     @Async
     public CompletableFuture<byte[]> loadImage(String id, boolean thumbnail) {
+        String cacheKey = "image:" + id + ":" + thumbnail;
+        byte[] cached = byteRedisTemplate.opsForValue().get(cacheKey);
+        if (cached != null) {
+            return CompletableFuture.completedFuture(cached);
+        }
         String imageId = id;
         String ext = "";
         int dot = id.lastIndexOf('.');
@@ -89,6 +101,7 @@ public class SmbService {
                 try {
                     System.out.println("尝试加载缩略图: " + thumbnailPath);
                     byte[] data = readBytes(thumbnailPath);
+                    byteRedisTemplate.opsForValue().set(cacheKey, data, Duration.ofHours(1));
                     System.out.println("缩略图加载成功，数据长度: " + data.length);
                     return CompletableFuture.completedFuture(data);
                 } catch (IOException thumbnailError) {
@@ -103,6 +116,7 @@ public class SmbService {
             System.out.println("加载原图: " + originalPath);
             
             byte[] data = readBytes(originalPath);
+            byteRedisTemplate.opsForValue().set(cacheKey, data, Duration.ofHours(1));
             System.out.println("原图加载成功，数据长度: " + data.length);
             return CompletableFuture.completedFuture(data);
             
@@ -117,6 +131,11 @@ public class SmbService {
      */
     @Async
     public CompletableFuture<byte[]> loadFile(String id) {
+        String cacheKey = "file:" + id;
+        byte[] cached = byteRedisTemplate.opsForValue().get(cacheKey);
+        if (cached != null) {
+            return CompletableFuture.completedFuture(cached);
+        }
         String imageId = id;
         String ext = "";
         int dot = id.lastIndexOf('.');
@@ -136,7 +155,9 @@ public class SmbService {
             }
             String fileName = name + "." + ext;
             String filePath = infoDir + "/" + fileName;
-            return CompletableFuture.completedFuture(readBytes(filePath));
+            byte[] data = readBytes(filePath);
+            byteRedisTemplate.opsForValue().set(cacheKey, data, Duration.ofHours(1));
+            return CompletableFuture.completedFuture(data);
         } catch (IOException e) {
             return CompletableFuture.completedFuture(new byte[0]);
         }
