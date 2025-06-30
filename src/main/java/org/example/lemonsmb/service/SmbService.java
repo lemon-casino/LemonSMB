@@ -18,6 +18,7 @@ import org.example.lemonsmb.model.FileEntry;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -35,6 +36,9 @@ public class SmbService {
 
     @Autowired
     private SmbProperties properties;
+
+    @Autowired
+    private StringRedisTemplate redisTemplate;
 
     private final ObjectMapper mapper = new ObjectMapper();
     private JsonNode metadataCache;
@@ -268,13 +272,22 @@ public class SmbService {
         List<FileEntry> result = new ArrayList<>();
         try {
             if (metadataCache == null) {
-                String meta = readFile(properties.getLibraryDir() + "/metadata.json");
-                metadataCache = mapper.readTree(meta).path("folders");
+                String meta = redisTemplate.opsForValue().get("metadata");
+                if (meta == null) {
+                    meta = readFile(properties.getLibraryDir() + "/metadata.json");
+                }
+                if (meta != null) {
+                    metadataCache = mapper.readTree(meta).path("folders");
+                }
             }
 
             String folderId = null;
             if (path != null && !path.isEmpty()) {
-                folderId = findFolderId(metadataCache, path.split("/"), 0);
+                if (containsFolderId(metadataCache, path)) {
+                    folderId = path;
+                } else {
+                    folderId = findFolderId(metadataCache, path.split("/"), 0);
+                }
             }
 
             String imagesBase = properties.getLibraryDir() + "/images";
@@ -330,7 +343,8 @@ public class SmbService {
                 safeClose(share);
             }
         } catch (IOException e) {
-            result.add("ERROR:" + e.getMessage());
+            // Log the error but return whatever results were collected
+            System.err.println("Failed to list files: " + e.getMessage());
         }
         return CompletableFuture.completedFuture(result);
     }
@@ -348,5 +362,20 @@ public class SmbService {
             }
         }
         return null;
+    }
+
+    private boolean containsFolderId(JsonNode folders, String id) {
+        if (folders == null) {
+            return false;
+        }
+        for (JsonNode folder : folders) {
+            if (id.equals(folder.path("id").asText())) {
+                return true;
+            }
+            if (containsFolderId(folder.path("children"), id)) {
+                return true;
+            }
+        }
+        return false;
     }
 }
