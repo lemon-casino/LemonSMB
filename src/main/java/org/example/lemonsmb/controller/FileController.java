@@ -14,6 +14,8 @@ import java.util.List;
 import java.util.Map;
 import org.example.lemonsmb.model.FileEntry;
 import java.util.concurrent.CompletableFuture;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 @RestController
 public class FileController {
@@ -41,6 +43,27 @@ public class FileController {
             @RequestParam(defaultValue = "0") int offset,
             @RequestParam(defaultValue = "20") int limit) {
         return smbService.listFiles(path, offset, limit);
+    }
+
+    /**
+     * 根据文件夹ID获取文件列表（使用Redis索引）
+     */
+    @GetMapping("/folder-files")
+    public List<FileEntry> listByFolder(@RequestParam String id) throws Exception {
+        List<String> ids = redisTemplate.opsForList().range("folder:" + id, 0, -1);
+        List<FileEntry> result = new java.util.ArrayList<>();
+        if (ids != null) {
+            ObjectMapper mapper = new ObjectMapper();
+            for (String fileId : ids) {
+                String meta = redisTemplate.opsForValue().get("meta:" + fileId);
+                if (meta != null) {
+                    JsonNode node = mapper.readTree(meta);
+                    String name = node.path("name").asText() + "." + node.path("ext").asText();
+                    result.add(new FileEntry(fileId, name));
+                }
+            }
+        }
+        return result;
     }
 
     /**
