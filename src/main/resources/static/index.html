@@ -487,6 +487,7 @@
         class FileExplorer {
             constructor() {
                 this.currentPath = '';
+                this.currentFolderId = '';
                 this.offset = 0;
                 this.limit = 100;
                 this.loading = false;
@@ -576,21 +577,21 @@
 
             buildFolderTree(folders, container = document.getElementById('folderTree'), basePath = '视觉素材库') {
                 const ul = document.createElement('ul');
-                
+
                 folders.forEach(folder => {
                     const li = document.createElement('li');
                     const folderPath = basePath + '/' + folder.name;
-                    
+
                     const folderItem = document.createElement('div');
                     folderItem.className = 'folder-item';
                     folderItem.innerHTML = `
                         <i class="fas fa-folder"></i>
                         <span>${folder.name}</span>
                     `;
-                    
+
                     folderItem.addEventListener('click', () => {
-                        this.selectFolder(folderPath, folderItem);
-                        
+                        this.selectFolder(folder.id, folderPath, folderItem);
+
                         // 展开子文件夹
                         if (folder.children && folder.children.length > 0) {
                             let childContainer = li.querySelector('ul');
@@ -610,7 +611,7 @@
                 container.appendChild(ul);
             }
 
-            selectFolder(path, element) {
+            selectFolder(id, path, element) {
                 // 更新活动状态
                 document.querySelectorAll('.folder-item').forEach(item => {
                     item.classList.remove('active');
@@ -619,6 +620,7 @@
 
                 // 更新当前路径和面包屑
                 this.currentPath = path;
+                this.currentFolderId = id;
                 this.updateBreadcrumb();
                 
                 // 重置并加载文件
@@ -664,7 +666,7 @@
                 console.log('loadFiles被调用:', {
                     loading: this.loading,
                     hasMore: this.hasMore,
-                    currentPath: this.currentPath,
+                    currentFolderId: this.currentFolderId,
                     offset: this.offset,
                     limit: this.limit
                 });
@@ -678,7 +680,7 @@
                 this.showLoading();
                 
                 try {
-                    const url = `/files?path=${encodeURIComponent(this.currentPath)}&offset=${this.offset}&limit=${this.limit}`;
+                    const url = `/files?path=${encodeURIComponent(this.currentFolderId)}&offset=${this.offset}&limit=${this.limit}`;
                     console.log('请求URL:', url);
                     
                     const response = await fetch(url);
@@ -904,17 +906,17 @@
                     // 当滚动到距离底部200px时就开始加载
                     if (scrollTop + clientHeight >= scrollHeight - 200) {
                         console.log('触发无限滚动:', {
-                            scrollTop, 
-                            clientHeight, 
-                            scrollHeight, 
+                            scrollTop,
+                            clientHeight,
+                            scrollHeight,
                             offset: this.offset,
                             loading: this.loading,
                             hasMore: this.hasMore,
-                            currentPath: this.currentPath
+                            currentFolderId: this.currentFolderId
                         });
                         
                         // 确保有路径且不在加载中且还有更多数据
-                        if (this.currentPath && !this.loading && this.hasMore) {
+                        if (this.currentFolderId && !this.loading && this.hasMore) {
                             console.log('开始加载更多文件...');
                             this.loadFiles();
                         }
@@ -935,10 +937,10 @@
                             offset: this.offset,
                             loading: this.loading,
                             hasMore: this.hasMore,
-                            currentPath: this.currentPath
+                            currentFolderId: this.currentFolderId
                         });
-                        
-                        if (this.currentPath && !this.loading && this.hasMore) {
+
+                        if (this.currentFolderId && !this.loading && this.hasMore) {
                             console.log('通过窗口滚动加载更多文件...');
                             this.loadFiles();
                         }
