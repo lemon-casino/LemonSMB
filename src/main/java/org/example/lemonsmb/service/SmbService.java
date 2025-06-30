@@ -437,7 +437,6 @@ public class SmbService {
         }
         return false;
     }
-
     /**
      * Resolve a folder path or ID to the corresponding folder ID.
      * The supplied path may include extra leading segments not present
