@@ -22,6 +22,7 @@ public class MetadataLoader {
         try {
             String metadata = smbService.readFile(base + "/metadata.json");
             redisTemplate.opsForValue().set("metadata", metadata);
+            smbService.refreshMetadataCache();
         } catch (IOException ignored) {
         }
         try {

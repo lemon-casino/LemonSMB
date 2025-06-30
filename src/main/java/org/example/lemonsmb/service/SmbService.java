@@ -21,6 +21,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import javax.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,6 +33,7 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.CompletableFuture;
 @Service
 public class SmbService {
@@ -45,7 +47,57 @@ public class SmbService {
     private StringRedisTemplate redisTemplate;
 
     private final ObjectMapper mapper = new ObjectMapper();
-    private JsonNode metadataCache;
+    private final AtomicReference<JsonNode> metadataCache = new AtomicReference<>();
+
+    @PostConstruct
+    public void init() {
+        loadMetadataFromRedis();
+    }
+
+    private JsonNode loadMetadataFromRedis() {
+        String meta = redisTemplate.opsForValue().get("metadata");
+        if (meta != null) {
+            try {
+                JsonNode node = mapper.readTree(meta).path("folders");
+                metadataCache.set(node);
+                log.info("Metadata cache loaded from Redis");
+                return node;
+            } catch (IOException e) {
+                log.warn("Failed to parse metadata from Redis: {}", e.getMessage());
+            }
+        }
+        return null;
+    }
+
+    /** Refresh in-memory metadata cache from Redis */
+    public void refreshMetadataCache() {
+        loadMetadataFromRedis();
+    }
+
+    private JsonNode getMetadata() {
+        JsonNode node = metadataCache.get();
+        if (node == null) {
+            synchronized (metadataCache) {
+                node = metadataCache.get();
+                if (node == null) {
+                    node = loadMetadataFromRedis();
+                    if (node == null) {
+                        try {
+                            log.debug("Metadata not found in Redis, reading from share");
+                            String meta = readFile(properties.getLibraryDir() + "/metadata.json");
+                            redisTemplate.opsForValue().set("metadata", meta);
+                            node = mapper.readTree(meta).path("folders");
+                            metadataCache.set(node);
+                            log.info("Metadata loaded from SMB and cached");
+                        } catch (IOException e) {
+                            log.error("Failed to load metadata from SMB: {}", e.getMessage());
+                        }
+                    }
+                }
+            }
+        }
+        return node;
+    }
 
     private byte[] readBytes(String remotePath) throws IOException {
         DiskShare share = null;
@@ -291,18 +343,6 @@ public class SmbService {
         log.info("Listing files - path: {}, offset: {}, limit: {}", path, offset, limit);
         List<FileEntry> result = new ArrayList<>();
         try {
-            if (metadataCache == null) {
-                String meta = redisTemplate.opsForValue().get("metadata");
-                if (meta == null) {
-                    log.debug("Metadata cache miss, reading from share");
-                    meta = readFile(properties.getLibraryDir() + "/metadata.json");
-                } else {
-                    log.debug("Loaded metadata from Redis cache");
-                }
-                if (meta != null) {
-                    metadataCache = mapper.readTree(meta).path("folders");
-                }
-            }
             String folderId = resolveFolderId(path);
             log.debug("Resolved folder id: {} for path: {}", folderId, path);
 
@@ -409,19 +449,20 @@ public class SmbService {
         if (path == null || path.isEmpty()) {
             return null;
         }
+        JsonNode meta = getMetadata();
         // When metadata is unavailable, assume the caller already supplied an ID
-        if (metadataCache == null) {
+        if (meta == null) {
             return path;
         }
         log.trace("Resolving folder ID for path {}", path);
-        if (containsFolderId(metadataCache, path)) {
+        if (containsFolderId(meta, path)) {
             return path;
         }
         String[] parts = path.split("/");
         for (int i = 0; i < parts.length; i++) {
             String[] subset = new String[parts.length - i];
             System.arraycopy(parts, i, subset, 0, subset.length);
-            String id = findFolderId(metadataCache, subset, 0);
+            String id = findFolderId(meta, subset, 0);
             if (id != null) {
                 log.trace("Path {} resolved to id {}", String.join("/", subset), id);
                 return id;
