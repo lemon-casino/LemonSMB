@@ -303,7 +303,6 @@ public class SmbService {
                     metadataCache = mapper.readTree(meta).path("folders");
                 }
             }
-
             String folderId = resolveFolderId(path);
             log.debug("Resolved folder id: {} for path: {}", folderId, path);
 
@@ -398,7 +397,6 @@ public class SmbService {
         }
         return false;
     }
-
     /**
      * Resolve a folder path or ID to the corresponding folder ID.
      * The supplied path may include extra leading segments not present
