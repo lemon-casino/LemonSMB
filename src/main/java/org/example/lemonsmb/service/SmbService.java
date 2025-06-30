@@ -18,8 +18,11 @@ import org.example.lemonsmb.model.FileEntry;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -33,8 +36,13 @@ import java.util.concurrent.CompletableFuture;
 @Service
 public class SmbService {
 
+    private static final Logger log = LoggerFactory.getLogger(SmbService.class);
+
     @Autowired
     private SmbProperties properties;
+
+    @Autowired
+    private StringRedisTemplate redisTemplate;
 
     private final ObjectMapper mapper = new ObjectMapper();
     private JsonNode metadataCache;
@@ -72,7 +80,7 @@ public class SmbService {
         String infoDir = imagesBase + "/" + imageId + ".info";
         String metaPath = infoDir + "/metadata.json";
         
-        System.out.println("加载图片 - ID: " + id + ", thumbnail: " + thumbnail);
+        log.info("加载图片 - ID: {}, thumbnail: {}", id, thumbnail);
         
         try {
             String meta = new String(readBytes(metaPath), StandardCharsets.UTF_8);
@@ -88,12 +96,12 @@ public class SmbService {
                 String thumbnailPath = infoDir + "/" + thumbnailFileName;
                 
                 try {
-                    System.out.println("尝试加载缩略图: " + thumbnailPath);
+                    log.debug("尝试加载缩略图: {}", thumbnailPath);
                     byte[] data = readBytes(thumbnailPath);
-                    System.out.println("缩略图加载成功，数据长度: " + data.length);
+                    log.debug("缩略图加载成功，数据长度: {}", data.length);
                     return CompletableFuture.completedFuture(data);
                 } catch (IOException thumbnailError) {
-                    System.out.println("缩略图不存在，回退到原图: " + thumbnailError.getMessage());
+                    log.debug("缩略图不存在，回退到原图: {}", thumbnailError.getMessage());
                     // 缩略图不存在，回退到原图
                 }
             }
@@ -101,14 +109,14 @@ public class SmbService {
             // 加载原图
             String originalFileName = name + "." + ext;
             String originalPath = infoDir + "/" + originalFileName;
-            System.out.println("加载原图: " + originalPath);
+            log.debug("加载原图: {}", originalPath);
             
             byte[] data = readBytes(originalPath);
-            System.out.println("原图加载成功，数据长度: " + data.length);
+            log.debug("原图加载成功，数据长度: {}", data.length);
             return CompletableFuture.completedFuture(data);
             
         } catch (IOException e) {
-            System.out.println("加载图片完全失败: " + e.getMessage());
+            log.error("加载图片完全失败: {}", e.getMessage());
             return CompletableFuture.completedFuture(new byte[0]);
         }
     }
@@ -118,6 +126,7 @@ public class SmbService {
      */
     @Async
     public CompletableFuture<byte[]> loadFile(String id) {
+        log.debug("Loading file {}", id);
         String imageId = id;
         String ext = "";
         int dot = id.lastIndexOf('.');
@@ -137,8 +146,10 @@ public class SmbService {
             }
             String fileName = name + "." + ext;
             String filePath = infoDir + "/" + fileName;
+            log.trace("Reading file bytes from {}", filePath);
             return CompletableFuture.completedFuture(readBytes(filePath));
         } catch (IOException e) {
+            log.error("加载文件失败 {}", e.getMessage());
             return CompletableFuture.completedFuture(new byte[0]);
         }
     }
@@ -148,6 +159,7 @@ public class SmbService {
      */
     @Async
     public CompletableFuture<FileInfo> getFileInfo(String id) {
+        log.debug("Getting file info for {}", id);
         String imageId = id;
         String ext = "";
         int dot = id.lastIndexOf('.');
@@ -188,6 +200,7 @@ public class SmbService {
                 }
             } catch (Exception e) {
                 // 如果获取文件信息失败，使用元数据中的信息
+                log.debug("无法获取文件 {} 的实际大小: {}", filePath, e.getMessage());
             } finally {
                 safeClose(share);
             }
@@ -210,12 +223,16 @@ public class SmbService {
     }
 
     private DiskShare connectShare() throws IOException {
+        log.debug("Connecting to SMB share {} on host {}", properties.getShare(), properties.getHost());
         SMBClient client = new SMBClient();
         Connection connection = client.connect(properties.getHost());
         AuthenticationContext auth = new AuthenticationContext(
                 properties.getUsername(), properties.getPassword().toCharArray(), null);
         Session session = connection.authenticate(auth);
-        return (DiskShare) session.connectShare(properties.getShare());
+        log.debug("Authenticated user {}", properties.getUsername());
+        DiskShare share = (DiskShare) session.connectShare(properties.getShare());
+        log.debug("Connected to share {}", properties.getShare());
+        return share;
     }
 
     /**
@@ -227,8 +244,11 @@ public class SmbService {
             return;
         }
         try {
+            log.trace("Closing share");
             share.close();
+            log.trace("Share closed");
         } catch (TransportException | SMBRuntimeException e) {
+            log.warn("Error closing share gracefully: {}", e.getMessage());
             try {
                 share.getTreeConnect().getSession().getConnection().close(true);
             } catch (Exception ignore) {
@@ -243,6 +263,7 @@ public class SmbService {
      * Read a file from the SMB share using UTF-8 encoding.
      */
     public String readFile(String remotePath) throws IOException {
+        log.debug("Reading file {}", remotePath);
         DiskShare share = null;
         try {
             share = connectShare();
@@ -253,7 +274,9 @@ public class SmbService {
                     SMB2CreateDisposition.FILE_OPEN,
                     null);
             try (InputStream is = f.getInputStream()) {
-                return new String(is.readAllBytes(), StandardCharsets.UTF_8);
+                String content = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+                log.trace("Read {} bytes from {}", content.length(), remotePath);
+                return content;
             }
         } catch (com.hierynomus.mssmb2.SMBApiException e) {
             // Wrap SMB errors so callers can handle uniformly
@@ -265,17 +288,24 @@ public class SmbService {
 
     @Async
     public CompletableFuture<List<FileEntry>> listFiles(String path, int offset, int limit) {
+        log.info("Listing files - path: {}, offset: {}, limit: {}", path, offset, limit);
         List<FileEntry> result = new ArrayList<>();
         try {
             if (metadataCache == null) {
-                String meta = readFile(properties.getLibraryDir() + "/metadata.json");
-                metadataCache = mapper.readTree(meta).path("folders");
+                String meta = redisTemplate.opsForValue().get("metadata");
+                if (meta == null) {
+                    log.debug("Metadata cache miss, reading from share");
+                    meta = readFile(properties.getLibraryDir() + "/metadata.json");
+                } else {
+                    log.debug("Loaded metadata from Redis cache");
+                }
+                if (meta != null) {
+                    metadataCache = mapper.readTree(meta).path("folders");
+                }
             }
 
-            String folderId = null;
-            if (path != null && !path.isEmpty()) {
-                folderId = findFolderId(metadataCache, path.split("/"), 0);
-            }
+            String folderId = resolveFolderId(path);
+            log.debug("Resolved folder id: {} for path: {}", folderId, path);
 
             String imagesBase = properties.getLibraryDir() + "/images";
             DiskShare share = null;
@@ -286,6 +316,7 @@ public class SmbService {
                     if (!f.getFileName().endsWith(".info")) {
                         continue;
                     }
+                    log.trace("Checking file {}", f.getFileName());
                     String imageId = f.getFileName().replace(".info", "");
                     String metaPath = imagesBase + "/" + f.getFileName() + "/metadata.json";
                     try (File mf = share.openFile(metaPath,
@@ -316,6 +347,7 @@ public class SmbService {
                             String ext = node.path("ext").asText();
                             String fileName = node.path("name").asText() + "." + ext;
                             String id = imageId + "." + ext;
+                            log.trace("Adding file {} ({})", fileName, id);
                             result.add(new FileEntry(id, fileName));
                             if (result.size() >= limit) {
                                 break;
@@ -330,8 +362,10 @@ public class SmbService {
                 safeClose(share);
             }
         } catch (IOException e) {
-            result.add("ERROR:" + e.getMessage());
+            // Log the error but return whatever results were collected
+            log.error("Failed to list files: {}", e.getMessage());
         }
+        log.info("Listed {} files", result.size());
         return CompletableFuture.completedFuture(result);
     }
 
@@ -347,6 +381,55 @@ public class SmbService {
                 return findFolderId(folder.path("children"), names, index + 1);
             }
         }
+        return null;
+    }
+
+    private boolean containsFolderId(JsonNode folders, String id) {
+        if (folders == null) {
+            return false;
+        }
+        for (JsonNode folder : folders) {
+            if (id.equals(folder.path("id").asText())) {
+                return true;
+            }
+            if (containsFolderId(folder.path("children"), id)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Resolve a folder path or ID to the corresponding folder ID.
+     * The supplied path may include extra leading segments not present
+     * in the metadata hierarchy. This method first checks if the given
+     * string already matches an existing folder ID. If not, it attempts
+     * to locate the folder by progressively matching the path segments
+     * against the metadata tree.
+     */
+    private String resolveFolderId(String path) {
+        if (path == null || path.isEmpty()) {
+            return null;
+        }
+        // When metadata is unavailable, assume the caller already supplied an ID
+        if (metadataCache == null) {
+            return path;
+        }
+        log.trace("Resolving folder ID for path {}", path);
+        if (containsFolderId(metadataCache, path)) {
+            return path;
+        }
+        String[] parts = path.split("/");
+        for (int i = 0; i < parts.length; i++) {
+            String[] subset = new String[parts.length - i];
+            System.arraycopy(parts, i, subset, 0, subset.length);
+            String id = findFolderId(metadataCache, subset, 0);
+            if (id != null) {
+                log.trace("Path {} resolved to id {}", String.join("/", subset), id);
+                return id;
+            }
+        }
+        log.trace("No folder ID found for path {}", path);
         return null;
     }
 }
