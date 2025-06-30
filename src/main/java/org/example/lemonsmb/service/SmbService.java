@@ -406,8 +406,12 @@ public class SmbService {
      * against the metadata tree.
      */
     private String resolveFolderId(String path) {
-        if (path == null || path.isEmpty() || metadataCache == null) {
+        if (path == null || path.isEmpty()) {
             return null;
+        }
+        // When metadata is unavailable, assume the caller already supplied an ID
+        if (metadataCache == null) {
+            return path;
         }
         log.trace("Resolving folder ID for path {}", path);
         if (containsFolderId(metadataCache, path)) {
