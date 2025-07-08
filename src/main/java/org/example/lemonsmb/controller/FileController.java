@@ -1,5 +1,9 @@
 package org.example.lemonsmb.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.example.lemonsmb.model.FileEntry;
+import org.example.lemonsmb.service.CacheService;
 import org.example.lemonsmb.service.SmbService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -9,13 +13,12 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import org.example.lemonsmb.model.FileEntry;
 import java.util.concurrent.CompletableFuture;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.stream.Collectors;
 
 @RestController
 public class FileController {
@@ -25,13 +28,30 @@ public class FileController {
 
     @Autowired
     private StringRedisTemplate redisTemplate;
+    
+    @Autowired
+    private CacheService cacheService;
+    
+    private final ObjectMapper mapper = new ObjectMapper();
 
     /**
      * 获取文件夹元数据
      */
     @GetMapping("/metadata")
     public String metadata() {
-        return redisTemplate.opsForValue().get("metadata");
+        // 尝试从缓存获取
+        String cachedMetadata = cacheService.getCachedValue("metadata");
+        if (cachedMetadata != null) {
+            return cachedMetadata;
+        }
+        
+        // 缓存未命中，从Redis获取
+        String metadata = redisTemplate.opsForValue().get("metadata");
+        if (metadata != null) {
+            // 存入缓存
+            cacheService.cacheValue("metadata", metadata, 24);
+        }
+        return metadata;
     }
 
     /**
@@ -42,7 +62,52 @@ public class FileController {
             @RequestParam(defaultValue = "") String path,
             @RequestParam(defaultValue = "0") int offset,
             @RequestParam(defaultValue = "20") int limit) {
-        return smbService.listFiles(path, offset, limit);
+        // 生成缓存键
+        String cacheKey = "files:" + path + ":" + offset + ":" + limit;
+        
+        // 检查path是否为文件夹ID格式（以M开头的字母数字组合）
+        if (path.matches("^M[\\dA-Z]+$")) {
+            // 尝试从缓存获取
+            String cachedFilesJson = cacheService.getCachedValue(cacheKey);
+            if (cachedFilesJson != null) {
+                try {
+                    // 解析缓存的JSON
+                    List<FileEntry> cachedFiles = mapper.readValue(cachedFilesJson, 
+                            mapper.getTypeFactory().constructCollectionType(List.class, FileEntry.class));
+                    System.out.println("从缓存获取文件夹 " + path + " 的文件列表，共 " + cachedFiles.size() + " 个文件");
+                    return CompletableFuture.completedFuture(cachedFiles);
+                } catch (Exception e) {
+                    System.err.println("解析缓存文件列表失败: " + e.getMessage());
+                }
+            }
+        }
+        
+        // 缓存未命中，使用SmbService获取文件列表
+        System.out.println("缓存未命中，从SMB服务器获取文件夹 " + path + " 的文件列表");
+        return smbService.listFiles(path, offset, limit)
+                .thenApply(files -> {
+                    // 如果是文件夹ID请求，将结果缓存起来
+                    if (path.matches("^M[\\dA-Z]+$") && !files.isEmpty()) {
+                        List<String> fileIds = files.stream()
+                                .map(FileEntry::getId)
+                                .map(id -> {
+                                    // 去掉扩展名，只保留ID部分
+                                    int dotIndex = id.lastIndexOf('.');
+                                    return dotIndex > 0 ? id.substring(0, dotIndex) : id;
+                                })
+                                .collect(Collectors.toList());
+                        cacheService.cacheFolderFiles(path, fileIds);
+                        System.out.println("已将文件夹 " + path + " 的文件列表缓存，共 " + files.size() + " 个文件");
+                        
+                        // 缓存CompletableFuture结果
+                        try {
+                            cacheService.cacheValue(cacheKey, mapper.writeValueAsString(files), 24);
+                        } catch (Exception e) {
+                            System.err.println("缓存文件列表失败: " + e.getMessage());
+                        }
+                    }
+                    return files;
+                });
     }
 
     /**
@@ -50,19 +115,63 @@ public class FileController {
      */
     @GetMapping("/folder-files")
     public List<FileEntry> listByFolder(@RequestParam String id) throws Exception {
-        List<String> ids = redisTemplate.opsForList().range("folder:" + id, 0, -1);
-        List<FileEntry> result = new java.util.ArrayList<>();
-        if (ids != null) {
-            ObjectMapper mapper = new ObjectMapper();
-            for (String fileId : ids) {
-                String meta = redisTemplate.opsForValue().get("meta:" + fileId);
-                if (meta != null) {
-                    JsonNode node = mapper.readTree(meta);
-                    String name = node.path("name").asText() + "." + node.path("ext").asText();
-                    result.add(new FileEntry(fileId, name));
-                }
+        // 生成缓存键
+        String cacheKey = "folder-files:" + id;
+        
+        // 尝试从缓存获取
+        String cachedFilesJson = cacheService.getCachedValue(cacheKey);
+        if (cachedFilesJson != null) {
+            try {
+                // 解析缓存的JSON
+                List<FileEntry> cachedFiles = mapper.readValue(cachedFilesJson, 
+                        mapper.getTypeFactory().constructCollectionType(List.class, FileEntry.class));
+                System.out.println("从缓存获取文件夹 " + id + " 的文件列表，共 " + cachedFiles.size() + " 个文件");
+                return cachedFiles;
+            } catch (Exception e) {
+                System.err.println("解析缓存文件列表失败: " + e.getMessage());
             }
         }
+        
+        // 从Redis获取文件ID列表（使用新的缓存键格式）
+        String folderKey = cacheService.getFullCacheKey("folder:" + id);
+        List<String> fileIds = redisTemplate.opsForList().range(folderKey, 0, -1);
+        
+        List<FileEntry> result = new ArrayList<>();
+        
+        if (fileIds != null && !fileIds.isEmpty()) {
+            for (String fileId : fileIds) {
+                if (fileId == null || fileId.isEmpty()) {
+                    continue;
+                }
+                
+                // 使用新的缓存格式获取元数据
+                String metaKey = cacheService.getFullCacheKey("meta:" + fileId);
+                String meta = redisTemplate.opsForValue().get(metaKey);
+                
+                if (meta != null) {
+                    try {
+                        JsonNode node = mapper.readTree(meta);
+                        String name = node.path("name").asText();
+                        String ext = node.path("ext").asText();
+                        String fullName = name + "." + ext;
+                        String entryId = fileId + "." + ext;
+                        System.out.println(fullName);
+                        System.out.println(entryId);
+                        result.add(new FileEntry(entryId, fullName));
+                    } catch (Exception e) {
+                        System.err.println("解析元数据错误: " + e.getMessage());
+                    }
+                }
+            }
+            
+            // 缓存结果
+            try {
+                cacheService.cacheValue(cacheKey, mapper.writeValueAsString(result), 24);
+            } catch (Exception e) {
+                System.err.println("缓存文件列表失败: " + e.getMessage());
+            }
+        }
+        
         return result;
     }
 
@@ -71,6 +180,23 @@ public class FileController {
      */
     @GetMapping("/file-info")
     public CompletableFuture<Map<String, Object>> getFileInfo(@RequestParam String path) {
+        // 生成缓存键
+        String cacheKey = "file-info:" + path;
+        
+        // 尝试从缓存获取
+        String cachedInfoJson = cacheService.getCachedValue(cacheKey);
+        if (cachedInfoJson != null) {
+            try {
+                // 解析缓存的JSON
+                Map<String, Object> cachedInfo = mapper.readValue(cachedInfoJson, 
+                        mapper.getTypeFactory().constructMapType(Map.class, String.class, Object.class));
+                System.out.println("从缓存获取文件信息: " + path);
+                return CompletableFuture.completedFuture(cachedInfo);
+            } catch (Exception e) {
+                System.err.println("解析缓存文件信息失败: " + e.getMessage());
+            }
+        }
+        
         return smbService.getFileInfo(path)
                 .thenApply(fileInfo -> {
                     Map<String, Object> result = new HashMap<>();
@@ -80,6 +206,14 @@ public class FileController {
                     result.put("isDirectory", fileInfo.isDirectory());
                     result.put("extension", getFileExtension(fileInfo.getName()));
                     result.put("type", getFileType(getFileExtension(fileInfo.getName())));
+                    
+                    // 缓存结果
+                    try {
+                        cacheService.cacheValue(cacheKey, mapper.writeValueAsString(result), 24);
+                    } catch (Exception e) {
+                        System.err.println("缓存文件信息失败: " + e.getMessage());
+                    }
+                    
                     return result;
                 });
     }
