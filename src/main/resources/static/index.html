@@ -582,6 +582,7 @@
                 this.searchQuery = '';
                 this.viewMode = 'grid';
                 this.files = [];
+                this.imageObserver = null;
                 // folder id -> name mapping
                 this.folderMap = {};
                 // folder id -> parent id mapping
@@ -594,6 +595,7 @@
                 this.bindEvents();
                 this.loadMetadata();
                 this.setupInfiniteScroll();
+                this.initLazyLoading();
             }
 
             bindEvents() {
@@ -864,18 +866,25 @@
                 fileCard.addEventListener('click', () => {
                     this.previewFile(fileId, fileName, fileType);
                 });
-                
+
                 filesGrid.appendChild(fileCard);
+
+                // 懒加载图片
+                const img = fileCard.querySelector('img.lazy-image');
+                if (img && this.imageObserver) {
+                    this.imageObserver.observe(img);
+                }
             }
 
             createFilePreview(fileId, fileName, fileType) {
                 const ext = this.getFileExtension(fileName);
                 // 对所有可能的图片格式都尝试显示图片
                 if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext)) {
-                    return `<img src="/image?id=${encodeURIComponent(fileId)}&thumbnail=false"
-                                 alt="${fileName}" 
-                                 onload="console.log('图片加载成功:', '${fileName}')"
-                                 onerror="console.log('图片加载失败:', '${fileName}', this.src); this.style.display='none'; this.nextElementSibling.style.display='flex'">
+                    return `<img data-src="/image?id=${encodeURIComponent(fileId)}&thumbnail=false"
+                                 class="lazy-image"
+                                 loading="lazy"
+                                 alt="${fileName}"
+                                 onerror="console.log('图片加载失败:', '${fileName}', this.dataset.src); this.style.display='none'; this.nextElementSibling.style.display='flex'">
                             <div class="file-icon" style="display: none;">
                                 <span class="${fileType.icon}" style="color: ${fileType.color}"></span>
                             </div>`;
@@ -1064,6 +1073,25 @@
                         }
                     }
                 });
+            }
+
+            initLazyLoading() {
+                const options = {
+                    root: document.querySelector('.files-container'),
+                    rootMargin: '200px'
+                };
+                this.imageObserver = new IntersectionObserver((entries, obs) => {
+                    entries.forEach(entry => {
+                        if (entry.isIntersecting) {
+                            const img = entry.target;
+                            if (img.dataset.src) {
+                                img.src = img.dataset.src;
+                                img.removeAttribute('data-src');
+                            }
+                            obs.unobserve(img);
+                        }
+                    });
+                }, options);
             }
 
             showLoading() {
