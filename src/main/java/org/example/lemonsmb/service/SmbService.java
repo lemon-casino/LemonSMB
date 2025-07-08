@@ -901,22 +901,25 @@ public class SmbService {
             metaList = Collections.emptyList();
         }
 
-        List<FileEntry> result = new ArrayList<>(metaList.size());
-        IntStream.range(0, metaList.size()).parallel().forEach(i -> {
-            String meta = metaList.get(i);
-            if (meta == null) {
-                return;
-            }
-            try {
-                JsonNode node = mapper.readTree(meta);
-                String ext = node.path("ext").asText();
-                String fileName = node.path("name").asText() + (ext.isEmpty() ? "" : "." + ext);
-                String id = pageIds.get(i) + (ext.isEmpty() ? "" : "." + ext);
-                result.add(new FileEntry(id, fileName));
-            } catch (Exception e) {
-                System.err.println("解析文件元数据失败: " + pageIds.get(i) + ", 错误: " + e.getMessage());
-            }
-        });
+        List<FileEntry> result = IntStream.range(0, metaList.size()).parallel()
+                .mapToObj(i -> {
+                    String meta = metaList.get(i);
+                    if (meta == null) {
+                        return null;
+                    }
+                    try {
+                        JsonNode node = mapper.readTree(meta);
+                        String ext = node.path("ext").asText();
+                        String fileName = node.path("name").asText() + (ext.isEmpty() ? "" : "." + ext);
+                        String id = pageIds.get(i) + (ext.isEmpty() ? "" : "." + ext);
+                        return new FileEntry(id, fileName);
+                    } catch (Exception e) {
+                        System.err.println("解析文件元数据失败: " + pageIds.get(i) + ", 错误: " + e.getMessage());
+                        return null;
+                    }
+                })
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
 
         System.out.println("文件列表获取完成，共 " + result.size() + " 个文件");
         return CompletableFuture.completedFuture(result);
