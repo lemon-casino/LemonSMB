@@ -35,6 +35,8 @@ import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 @Service
 public class SmbService {
@@ -890,29 +892,31 @@ public class SmbService {
         int to = Math.min(from + limit, allFileIds.size());
         List<String> pageIds = allFileIds.subList(from, to);
 
-        // 并行处理元数据
-        List<FileEntry> result = pageIds.parallelStream()
-                .map(fileId -> {
-                    if (fileId == null || fileId.isEmpty()) {
-                        return null;
-                    }
-                    String metaKey = cacheService.getFullCacheKey("meta:" + fileId);
-                    String meta = redisTemplate.opsForValue().get(metaKey);
-                    if (meta != null) {
-                        try {
-                            JsonNode node = mapper.readTree(meta);
-                            String ext = node.path("ext").asText();
-                            String fileName = node.path("name").asText() + (ext.isEmpty() ? "" : "." + ext);
-                            String id = fileId + (ext.isEmpty() ? "" : "." + ext);
-                            return new FileEntry(id, fileName);
-                        } catch (Exception e) {
-                            System.err.println("解析文件元数据失败: " + fileId + ", 错误: " + e.getMessage());
-                        }
-                    }
-                    return null;
-                })
-                .filter(Objects::nonNull)
+        // 批量获取元数据，减少与Redis的网络往返
+        List<String> metaKeys = pageIds.stream()
+                .map(id -> cacheService.getFullCacheKey("meta:" + id))
                 .collect(Collectors.toList());
+        List<String> metaList = redisTemplate.opsForValue().multiGet(metaKeys);
+        if (metaList == null) {
+            metaList = Collections.emptyList();
+        }
+
+        List<FileEntry> result = new ArrayList<>(metaList.size());
+        IntStream.range(0, metaList.size()).forEach(i -> {
+            String meta = metaList.get(i);
+            if (meta == null) {
+                return;
+            }
+            try {
+                JsonNode node = mapper.readTree(meta);
+                String ext = node.path("ext").asText();
+                String fileName = node.path("name").asText() + (ext.isEmpty() ? "" : "." + ext);
+                String id = pageIds.get(i) + (ext.isEmpty() ? "" : "." + ext);
+                result.add(new FileEntry(id, fileName));
+            } catch (Exception e) {
+                System.err.println("解析文件元数据失败: " + pageIds.get(i) + ", 错误: " + e.getMessage());
+            }
+        });
 
         System.out.println("文件列表获取完成，共 " + result.size() + " 个文件");
         return CompletableFuture.completedFuture(result);
