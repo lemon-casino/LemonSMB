@@ -862,4 +862,98 @@ public class SmbService {
             connectionLock.unlock();
         }
     }
+
+    /**
+     * 获取指定文件夹及其子文件夹中的文件列表
+     */
+    @Async
+    public CompletableFuture<List<FileEntry>> listFilesWithChildren(String folderId, int offset, int limit) {
+        System.out.println("开始获取文件夹及子文件夹文件列表 - folderId: " + folderId + ", offset: " + offset + ", limit: " + limit);
+        List<FileEntry> result = new ArrayList<>();
+
+        // 收集所有子文件夹ID（递归）
+        List<String> allFolders = new ArrayList<>();
+        collectChildFolders(folderId, allFolders);
+        // 将自身放在列表首位
+        allFolders.add(0, folderId);
+        System.out.println("文件夹及子文件夹列表: " + allFolders);
+
+        int skipped = 0;
+        outer:
+        for (String fid : allFolders) {
+            String folderKey = cacheService.getFullCacheKey("folder:" + fid);
+            System.out.println("查询文件夹文件列表 - 文件夹ID: " + fid + ", Redis键: " + folderKey);
+            
+            List<String> fileIds = redisTemplate.opsForList().range(folderKey, 0, -1);
+            if (fileIds == null) {
+                System.out.println("文件夹 " + fid + " 的文件ID列表为null");
+                continue;
+            }
+            System.out.println("文件夹 " + fid + " 的文件ID列表大小: " + fileIds.size());
+            
+            for (String fileId : fileIds) {
+                if (fileId == null || fileId.isEmpty()) {
+                    System.out.println("跳过空文件ID");
+                    continue;
+                }
+                
+                String metaKey = cacheService.getFullCacheKey("meta:" + fileId);
+                System.out.println("查询文件元数据 - 文件ID: " + fileId + ", Redis键: " + metaKey);
+                
+                String meta = redisTemplate.opsForValue().get(metaKey);
+                if (meta != null) {
+                    try {
+                        JsonNode node = mapper.readTree(meta);
+                        String ext = node.path("ext").asText();
+                        String fileName = node.path("name").asText() + (ext.isEmpty() ? "" : "." + ext);
+                        String id = fileId + (ext.isEmpty() ? "" : "." + ext);
+                        
+                        if (skipped < offset) {
+                            skipped++;
+                            System.out.println("跳过文件(offset): " + fileName);
+                            continue;
+                        }
+                        
+                        System.out.println("添加文件到结果集: " + fileName);
+                        result.add(new FileEntry(id, fileName));
+                        
+                        if (result.size() >= limit) {
+                            System.out.println("达到请求的文件数量限制: " + limit);
+                            break outer;
+                        }
+                    } catch (Exception e) {
+                        System.err.println("解析文件元数据失败: " + fileId + ", 错误: " + e.getMessage());
+                    }
+                } else {
+                    System.out.println("文件 " + fileId + " 的元数据不存在");
+                }
+            }
+        }
+
+        System.out.println("文件列表获取完成，共 " + result.size() + " 个文件");
+        return CompletableFuture.completedFuture(result);
+    }
+
+    private void collectChildFolders(String folderId, List<String> result) {
+        String infoJson = cacheService.getCachedValue("folder_info:" + folderId);
+        if (infoJson == null) {
+            return;
+        }
+        try {
+            JsonNode node = mapper.readTree(infoJson);
+            JsonNode children = node.path("children");
+            if (children.isArray()) {
+                for (JsonNode child : children) {
+                    String cid = child.path("id").asText();
+                    if (!cid.isEmpty()) {
+                        result.add(cid);
+                        collectChildFolders(cid, result);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("解析文件夹信息失败: " + e.getMessage());
+        }
+    }
+
 }

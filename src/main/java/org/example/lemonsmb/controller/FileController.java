@@ -17,8 +17,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.stream.Collectors;
 
 @RestController
 public class FileController {
@@ -62,9 +62,8 @@ public class FileController {
             @RequestParam(defaultValue = "") String path,
             @RequestParam(defaultValue = "0") int offset,
             @RequestParam(defaultValue = "20") int limit) {
-        // 生成缓存键
         String cacheKey = "files:" + path + ":" + offset + ":" + limit;
-        
+
         // 检查path是否为文件夹ID格式（以M开头的字母数字组合）
         if (path.matches("^M[\\dA-Z]+$")) {
             // 尝试从缓存获取
@@ -72,7 +71,7 @@ public class FileController {
             if (cachedFilesJson != null) {
                 try {
                     // 解析缓存的JSON
-                    List<FileEntry> cachedFiles = mapper.readValue(cachedFilesJson, 
+                    List<FileEntry> cachedFiles = mapper.readValue(cachedFilesJson,
                             mapper.getTypeFactory().constructCollectionType(List.class, FileEntry.class));
                     System.out.println("从缓存获取文件夹 " + path + " 的文件列表，共 " + cachedFiles.size() + " 个文件");
                     return CompletableFuture.completedFuture(cachedFiles);
@@ -81,33 +80,27 @@ public class FileController {
                 }
             }
         }
-        
+
         // 缓存未命中，使用SmbService获取文件列表
         System.out.println("缓存未命中，从SMB服务器获取文件夹 " + path + " 的文件列表");
-        return smbService.listFiles(path, offset, limit)
-                .thenApply(files -> {
-                    // 如果是文件夹ID请求，将结果缓存起来
-                    if (path.matches("^M[\\dA-Z]+$") && !files.isEmpty()) {
-                        List<String> fileIds = files.stream()
-                                .map(FileEntry::getId)
-                                .map(id -> {
-                                    // 去掉扩展名，只保留ID部分
-                                    int dotIndex = id.lastIndexOf('.');
-                                    return dotIndex > 0 ? id.substring(0, dotIndex) : id;
-                                })
-                                .collect(Collectors.toList());
-                        cacheService.cacheFolderFiles(path, fileIds);
-                        System.out.println("已将文件夹 " + path + " 的文件列表缓存，共 " + files.size() + " 个文件");
-                        
-                        // 缓存CompletableFuture结果
-                        try {
-                            cacheService.cacheValue(cacheKey, mapper.writeValueAsString(files), 24);
-                        } catch (Exception e) {
-                            System.err.println("缓存文件列表失败: " + e.getMessage());
-                        }
-                    }
-                    return files;
-                });
+        CompletableFuture<List<FileEntry>> future;
+        if (path.matches("^M[\\dA-Z]+$")) {
+            future = smbService.listFilesWithChildren(path, offset, limit);
+        } else {
+            future = smbService.listFiles(path, offset, limit);
+        }
+
+        return future.thenApply(files -> {
+            // 如果是文件夹ID请求，将结果缓存起来（不更新folder->files映射）
+            if (path.matches("^M[\\dA-Z]+$") && !files.isEmpty()) {
+                try {
+                    cacheService.cacheValue(cacheKey, mapper.writeValueAsString(files), 24);
+                } catch (Exception e) {
+                    System.err.println("缓存文件列表失败: " + e.getMessage());
+                }
+            }
+            return files;
+        });
     }
 
     /**
@@ -510,5 +503,128 @@ public class FileController {
         }
         
         return typeInfo;
+    }
+
+    /**
+     * 调试接口 - 检查Redis中的文件夹文件关联
+     */
+    @GetMapping("/debug/folder-files")
+    public Map<String, Object> debugFolderFiles(@RequestParam String folderId) {
+        Map<String, Object> result = new HashMap<>();
+        
+        try {
+            // 获取文件夹信息
+            String folderInfoKey = cacheService.getFullCacheKey("folder_info:" + folderId);
+            String folderInfo = redisTemplate.opsForValue().get(folderInfoKey);
+            result.put("folderInfoKey", folderInfoKey);
+            result.put("folderInfoExists", folderInfo != null);
+            
+            // 获取文件夹文件列表
+            String folderKey = cacheService.getFullCacheKey("folder:" + folderId);
+            List<String> fileIds = redisTemplate.opsForList().range(folderKey, 0, -1);
+            result.put("folderKey", folderKey);
+            result.put("fileIdsCount", fileIds != null ? fileIds.size() : 0);
+            
+            // 检查文件元数据
+            List<Map<String, Object>> filesInfo = new ArrayList<>();
+            if (fileIds != null) {
+                for (String fileId : fileIds) {
+                    if (fileId == null || fileId.isEmpty()) {
+                        continue;
+                    }
+                    
+                    Map<String, Object> fileInfo = new HashMap<>();
+                    fileInfo.put("fileId", fileId);
+                    
+                    String metaKey = cacheService.getFullCacheKey("meta:" + fileId);
+                    String meta = redisTemplate.opsForValue().get(metaKey);
+                    
+                    fileInfo.put("metaKey", metaKey);
+                    fileInfo.put("metaExists", meta != null);
+                    
+                    if (meta != null) {
+                        try {
+                            JsonNode node = mapper.readTree(meta);
+                            fileInfo.put("name", node.path("name").asText());
+                            fileInfo.put("ext", node.path("ext").asText());
+                        } catch (Exception e) {
+                            fileInfo.put("error", "解析元数据失败: " + e.getMessage());
+                        }
+                    }
+                    
+                    filesInfo.add(fileInfo);
+                }
+            }
+            result.put("files", filesInfo);
+            
+            // 检查子文件夹
+            List<String> childFolders = new ArrayList<>();
+            if (folderInfo != null) {
+                try {
+                    JsonNode node = mapper.readTree(folderInfo);
+                    JsonNode children = node.path("children");
+                    if (children.isArray()) {
+                        for (JsonNode child : children) {
+                            String childId = child.path("id").asText();
+                            if (!childId.isEmpty()) {
+                                childFolders.add(childId);
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    result.put("childFoldersError", "解析文件夹信息失败: " + e.getMessage());
+                }
+            }
+            result.put("childFolders", childFolders);
+            
+        } catch (Exception e) {
+            result.put("error", "调试过程中发生错误: " + e.getMessage());
+        }
+        
+        return result;
+    }
+
+    /**
+     * 调试接口 - 检查Redis中的缓存键
+     */
+    @GetMapping("/debug/cache-keys")
+    public Map<String, Object> debugCacheKeys(@RequestParam(required = false) String pattern) {
+        Map<String, Object> result = new HashMap<>();
+        
+        try {
+            String searchPattern = pattern != null ? pattern : "*";
+            Set<String> keys = redisTemplate.keys(searchPattern);
+            
+            result.put("pattern", searchPattern);
+            result.put("count", keys != null ? keys.size() : 0);
+            result.put("keys", keys);
+            
+        } catch (Exception e) {
+            result.put("error", "获取缓存键失败: " + e.getMessage());
+        }
+        
+        return result;
+    }
+
+    /**
+     * 管理接口 - 重建索引
+     */
+    @GetMapping("/admin/rebuild-index")
+    public Map<String, Object> rebuildIndex() {
+        Map<String, Object> result = new HashMap<>();
+        
+        try {
+            // 异步重建索引
+            CompletableFuture<Void> future = smbService.indexLibrary();
+            
+            result.put("status", "success");
+            result.put("message", "索引重建已启动，请稍后查看日志了解进度");
+            
+        } catch (Exception e) {
+            result.put("status", "error");
+            result.put("message", "启动索引重建失败: " + e.getMessage());
+        }
+        
+        return result;
     }
 }

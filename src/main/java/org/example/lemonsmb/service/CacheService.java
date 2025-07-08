@@ -34,7 +34,8 @@ public class CacheService {
     
     // 不需要添加cache:前缀的键前缀列表
     private static final Set<String> NON_PREFIXED_KEYS = new HashSet<>(Arrays.asList(
-        "folder:", "meta:", "metadata", "folder-files:", "folder_info:"
+            "folder:", "meta:", "metadata", "folder-files:", "folder_info:",
+            "folder_all_files:"
     ));
     
     /**
@@ -43,9 +44,15 @@ public class CacheService {
      * @return 是否需要添加前缀
      */
     private boolean shouldAddPrefix(String key) {
+        // 如果键已经包含前缀，不再添加
+        if (key.startsWith(CACHE_PREFIX)) {
+            return false;
+        }
+        
         // 检查是否明确指定为不需要前缀的键
         for (String nonPrefixedKey : NON_PREFIXED_KEYS) {
             if (key.startsWith(nonPrefixedKey) || key.equals(nonPrefixedKey.substring(0, nonPrefixedKey.length() - 1))) {
+                System.out.println("键 " + key + " 匹配非前缀模式 " + nonPrefixedKey + "，不添加前缀");
                 return false;
             }
         }
@@ -53,11 +60,13 @@ public class CacheService {
         // 检查是否明确指定为需要前缀的键
         for (String prefixedKey : PREFIXED_KEYS) {
             if (key.startsWith(prefixedKey)) {
+                System.out.println("键 " + key + " 匹配前缀模式 " + prefixedKey + "，添加前缀");
                 return true;
             }
         }
         
         // 默认添加前缀（对于未明确指定的键）
+        System.out.println("键 " + key + " 未匹配任何模式，默认添加前缀");
         return true;
     }
     
@@ -67,7 +76,9 @@ public class CacheService {
      * @return 完整的缓存键
      */
     public String getFullCacheKey(String key) {
-        return shouldAddPrefix(key) ? CACHE_PREFIX + key : key;
+        String fullKey = shouldAddPrefix(key) ? CACHE_PREFIX + key : key;
+        System.out.println("原始键: " + key + " -> 完整键: " + fullKey);
+        return fullKey;
     }
     
     /**
@@ -221,12 +232,99 @@ public class CacheService {
      * 获取文件的完整路径缓存键
      */
     public String getFilePathCacheKey(String filePath) {
-        System.out.println("!------->"+ CACHE_PREFIX + FILE_KEY + filePath);
+        // 检查filePath是否已经包含前缀，避免重复添加
+        if (filePath.startsWith(CACHE_PREFIX)) {
+            System.out.println("文件路径已包含cache:前缀，不再添加: " + filePath);
+            return filePath;
+        }
+        
         // 检查filePath是否已经包含file:前缀，避免重复添加
-        if (filePath.startsWith("file:")) {
-            return CACHE_PREFIX + filePath;
+        String result;
+        if (filePath.startsWith(FILE_KEY)) {
+            result = CACHE_PREFIX + filePath;
+            System.out.println("文件路径已包含file:前缀: " + filePath + " -> " + result);
         } else {
-            return CACHE_PREFIX + FILE_KEY + filePath;
+            result = CACHE_PREFIX + FILE_KEY + filePath;
+            System.out.println("文件路径添加完整前缀: " + filePath + " -> " + result);
+        }
+        return result;
+    }
+
+    /**
+     * 获取包含子文件夹的完整文件ID列表
+     */
+    public List<String> getFolderAllFileIds(String folderId) {
+        String key = getFullCacheKey("folder_all_files:" + folderId);
+        String json = redisTemplate.opsForValue().get(key);
+        if (json == null) {
+            return null;
+        }
+        try {
+            return mapper.readValue(json,
+                    mapper.getTypeFactory().constructCollectionType(List.class, String.class));
+        } catch (Exception e) {
+            System.err.println("解析folder_all_files失败: " + e.getMessage());
+            return null;
         }
     }
+
+    /**
+     * 缓存包含子文件夹的完整文件ID列表
+     */
+    public void cacheFolderAllFileIds(String folderId, List<String> fileIds) {
+        String key = getFullCacheKey("folder_all_files:" + folderId);
+        try {
+            redisTemplate.opsForValue().set(key, mapper.writeValueAsString(fileIds));
+            redisTemplate.expire(key, 24, TimeUnit.HOURS);
+        } catch (Exception e) {
+            System.err.println("缓存folder_all_files失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 构建包含子文件夹的文件ID列表
+     */
+    public List<String> buildFolderAllFileIds(String folderId) {
+        Set<String> collected = new LinkedHashSet<>();
+        collectFolderAllFileIds(folderId, collected);
+        return new ArrayList<>(collected);
+    }
+
+    private void collectFolderAllFileIds(String folderId, Set<String> collector) {
+        String folderKey = getFullCacheKey(FOLDER_KEY + folderId);
+        List<String> ids = redisTemplate.opsForList().range(folderKey, 0, -1);
+        if (ids != null) {
+            for (String id : ids) {
+                if (id != null && !id.isEmpty()) {
+                    collector.add(id);
+                }
+            }
+        }
+
+        String infoJson = getCachedValue("folder_info:" + folderId);
+        if (infoJson != null) {
+            try {
+                JsonNode node = mapper.readTree(infoJson);
+                JsonNode children = node.path("children");
+                if (children.isArray()) {
+                    for (JsonNode child : children) {
+                        String cid = child.path("id").asText();
+                        if (!cid.isEmpty()) {
+                            collectFolderAllFileIds(cid, collector);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("解析folder_info失败: " + e.getMessage());
+            }
+        }
+    }
+
+
+
+
+
+
+
+
 } 
