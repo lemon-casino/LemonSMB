@@ -440,7 +440,7 @@
             <div class="toolbar">
                 <nav class="breadcrumb-nav">
                     <ol class="breadcrumb" id="breadcrumb">
-                        <li class="breadcrumb-item active">首页</li>
+                        <li class="breadcrumb-item active">视觉素材库</li>
                     </ol>
                 </nav>
                 
@@ -494,7 +494,11 @@
                 this.searchQuery = '';
                 this.viewMode = 'grid';
                 this.files = [];
-                
+                // folder id -> name mapping
+                this.folderMap = {};
+                // folder id -> parent id mapping
+                this.folderParents = {};
+                this.rootName = '视觉素材库';
                 this.init();
             }
 
@@ -567,6 +571,8 @@
                     const data = await response.json();
                     
                     if (data && data.folders) {
+                        this.folderMap = {};
+                        this.folderParents = {};
                         this.buildFolderTree(data.folders);
                     }
                 } catch (error) {
@@ -574,30 +580,32 @@
                 }
             }
 
-            buildFolderTree(folders, container = document.getElementById('folderTree'), basePath = '视觉素材库') {
+            buildFolderTree(folders, container = document.getElementById('folderTree'), parentId = null) {
                 const ul = document.createElement('ul');
                 
                 folders.forEach(folder => {
                     const li = document.createElement('li');
-                    const folderPath = basePath + '/' + folder.name;
-                    
+
+                    // store mappings
+                    this.folderMap[folder.id] = folder.name;
+                    this.folderParents[folder.id] = parentId;
                     const folderItem = document.createElement('div');
                     folderItem.className = 'folder-item';
+                    folderItem.dataset.id = folder.id;
                     folderItem.innerHTML = `
                         <i class="fas fa-folder"></i>
                         <span>${folder.name}</span>
                     `;
                     
                     folderItem.addEventListener('click', () => {
-                        this.selectFolder(folderPath, folderItem);
-                        
+                        this.selectFolder(folder.id, folderItem);
                         // 展开子文件夹
                         if (folder.children && folder.children.length > 0) {
                             let childContainer = li.querySelector('ul');
                             if (!childContainer) {
                                 childContainer = document.createElement('ul');
                                 childContainer.style.paddingLeft = '20px';
-                                this.buildFolderTree(folder.children, childContainer, folderPath);
+                                this.buildFolderTree(folder.children, childContainer, folder.id);
                                 li.appendChild(childContainer);
                             }
                         }
@@ -633,21 +641,24 @@
 
             updateBreadcrumb() {
                 const breadcrumb = document.getElementById('breadcrumb');
-                const pathParts = this.currentPath.split('/').filter(part => part);
-                
                 breadcrumb.innerHTML = '';
-                
-                // 添加首页
+                const ids = [];
+                let current = this.currentPath;
+                while (current) {
+                    ids.unshift(current);
+                    current = this.folderParents[current];
+                }
+
                 const homeItem = document.createElement('li');
                 homeItem.className = 'breadcrumb-item';
-                homeItem.innerHTML = '<i class="fas fa-home"></i>';
+                homeItem.textContent = this.rootName;
                 breadcrumb.appendChild(homeItem);
                 
                 // 添加路径部分
-                pathParts.forEach((part, index) => {
+                ids.forEach((id, index) => {
                     const item = document.createElement('li');
-                    item.className = index === pathParts.length - 1 ? 'breadcrumb-item active' : 'breadcrumb-item';
-                    item.textContent = part;
+                    item.className = index === ids.length - 1 ? 'breadcrumb-item active' : 'breadcrumb-item';
+                    item.textContent = this.folderMap[id] || id;
                     breadcrumb.appendChild(item);
                 });
             }
