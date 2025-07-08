@@ -229,14 +229,13 @@ public class SmbService {
                 
                 try {
                     System.out.println("尝试加载缩略图: " + thumbnailPath);
+
                     byte[] data = readBytes(thumbnailPath);
-                    
-                    // 同时存入新旧缓存
-                    byteRedisTemplate.opsForValue().set(cacheKey, data, Duration.ofHours(1));
-                    if (cacheService != null) {
-                        byteRedisTemplate.opsForValue().set(cacheService.getFilePathCacheKey(cacheKey), data, Duration.ofHours(1));
-                    }
-                    
+
+                    String targetKey = cacheService != null ?
+                            cacheService.getFilePathCacheKey(cacheKey) : cacheKey;
+                    byteRedisTemplate.opsForValue().set(targetKey, data, Duration.ofHours(1));
+
                     System.out.println("缩略图加载成功，数据长度: " + data.length);
                     return CompletableFuture.completedFuture(data);
                 } catch (IOException thumbnailError) {
@@ -251,13 +250,11 @@ public class SmbService {
             System.out.println("加载原图: " + originalPath);
             
             byte[] data = readBytes(originalPath);
-            
-            // 同时存入新旧缓存
-            byteRedisTemplate.opsForValue().set(cacheKey, data, Duration.ofHours(1));
-            if (cacheService != null) {
-                byteRedisTemplate.opsForValue().set(cacheService.getFilePathCacheKey(cacheKey), data, Duration.ofHours(1));
-            }
-            
+
+            String targetKey = cacheService != null ?
+                    cacheService.getFilePathCacheKey(cacheKey) : cacheKey;
+            byteRedisTemplate.opsForValue().set(targetKey, data, Duration.ofHours(1));
+
             System.out.println("原图加载成功，数据长度: " + data.length);
             return CompletableFuture.completedFuture(data);
             
@@ -299,13 +296,9 @@ public class SmbService {
             // 如果是直接路径，直接加载
             if (id.contains("/")) {
                 byte[] data = readBytes(id);
-                
-                // 同时存入新旧缓存
-                byteRedisTemplate.opsForValue().set(cacheKey, data, Duration.ofHours(1));
-                if (cacheService != null) {
-                    byteRedisTemplate.opsForValue().set(cacheService.getFilePathCacheKey(cacheKey), data, Duration.ofHours(1));
-                }
-                
+                String targetKey = cacheService != null ?
+                        cacheService.getFilePathCacheKey(cacheKey) : cacheKey;
+                byteRedisTemplate.opsForValue().set(targetKey, data, Duration.ofHours(1));
                 return CompletableFuture.completedFuture(data);
             }
             
@@ -330,12 +323,10 @@ public class SmbService {
             String fileName = name + "." + ext;
             String filePath = infoDir + "/" + fileName;
             byte[] data = readBytes(filePath);
-            
-            // 同时存入新旧缓存
-            byteRedisTemplate.opsForValue().set(cacheKey, data, Duration.ofHours(1));
-            if (cacheService != null) {
-                byteRedisTemplate.opsForValue().set(cacheService.getFilePathCacheKey(cacheKey), data, Duration.ofHours(1));
-            }
+
+            String targetKey = cacheService != null ?
+                    cacheService.getFilePathCacheKey(cacheKey) : cacheKey;
+            byteRedisTemplate.opsForValue().set(targetKey, data, Duration.ofHours(1));
             
             return CompletableFuture.completedFuture(data);
         } catch (IOException e) {
