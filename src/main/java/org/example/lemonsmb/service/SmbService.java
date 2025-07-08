@@ -37,6 +37,7 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 @Service
 public class SmbService {
@@ -877,15 +878,14 @@ public class SmbService {
         allFolders.add(0, folderId);
         System.out.println("文件夹及子文件夹列表: " + allFolders);
 
-        // 汇总所有文件ID
-        List<String> allFileIds = new ArrayList<>();
-        for (String fid : allFolders) {
-            String folderKey = cacheService.getFullCacheKey("folder:" + fid);
-            List<String> fileIds = redisTemplate.opsForList().range(folderKey, 0, -1);
-            if (fileIds != null) {
-                allFileIds.addAll(fileIds);
-            }
-        }
+        // 汇总所有文件ID，使用并行流提高获取速度
+        List<String> allFileIds = allFolders.parallelStream()
+                .flatMap(fid -> {
+                    String folderKey = cacheService.getFullCacheKey("folder:" + fid);
+                    List<String> fileIds = redisTemplate.opsForList().range(folderKey, 0, -1);
+                    return fileIds != null ? fileIds.stream() : Stream.empty();
+                })
+                .collect(Collectors.toList());
 
         // 根据offset和limit切片
         int from = Math.min(offset, allFileIds.size());
@@ -902,7 +902,7 @@ public class SmbService {
         }
 
         List<FileEntry> result = new ArrayList<>(metaList.size());
-        IntStream.range(0, metaList.size()).forEach(i -> {
+        IntStream.range(0, metaList.size()).parallel().forEach(i -> {
             String meta = metaList.get(i);
             if (meta == null) {
                 return;
