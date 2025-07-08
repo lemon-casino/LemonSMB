@@ -763,7 +763,7 @@
                 const ext = this.getFileExtension(fileName);
                 // 对所有可能的图片格式都尝试显示图片
                 if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'].includes(ext)) {
-                    return `<img src="/image?id=${encodeURIComponent(fileId)}&thumbnail=true" 
+                    return `<img src="/image?id=${encodeURIComponent(fileId)}&thumbnail=false"
                                  alt="${fileName}" 
                                  onload="console.log('图片加载成功:', '${fileName}')"
                                  onerror="console.log('图片加载失败:', '${fileName}', this.src); this.style.display='none'; this.nextElementSibling.style.display='flex'">

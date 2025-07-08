@@ -606,25 +606,5 @@ public class FileController {
         return result;
     }
 
-    /**
-     * 管理接口 - 重建索引
-     */
-    @GetMapping("/admin/rebuild-index")
-    public Map<String, Object> rebuildIndex() {
-        Map<String, Object> result = new HashMap<>();
-        
-        try {
-            // 异步重建索引
-            CompletableFuture<Void> future = smbService.indexLibrary();
-            
-            result.put("status", "success");
-            result.put("message", "索引重建已启动，请稍后查看日志了解进度");
-            
-        } catch (Exception e) {
-            result.put("status", "error");
-            result.put("message", "启动索引重建失败: " + e.getMessage());
-        }
-        
-        return result;
-    }
+    // 注：重建索引功能已移至AdminController
 }

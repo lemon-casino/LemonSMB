@@ -138,8 +138,7 @@ public class CacheService {
         redisTemplate.delete(cacheKey);
         if (!fileIds.isEmpty()) {
             redisTemplate.opsForList().rightPushAll(cacheKey, fileIds.toArray(new String[0]));
-            // 设置缓存过期时间，避免长期占用内存
-            redisTemplate.expire(cacheKey, 24, TimeUnit.HOURS);
+            // 不设置过期时间，使缓存永久有效
         }
     }
     
@@ -150,12 +149,11 @@ public class CacheService {
         // 使用新的缓存键格式
         String cacheKey = getFullCacheKey(META_KEY + fileId);
         redisTemplate.opsForValue().set(cacheKey, metadata);
-        // 设置缓存过期时间
-        redisTemplate.expire(cacheKey, 24, TimeUnit.HOURS);
+        // 不设置过期时间，使缓存永久有效
     }
     
     /**
-     * 缓存任意对象（用于CompletableFuture结果）
+     * 缓存任意对象（用于CompletableFuture结果），带过期时间
      * @param key 缓存键
      * @param value 缓存值
      * @param expireHours 过期时间（小时）
@@ -164,6 +162,17 @@ public class CacheService {
         String cacheKey = getFullCacheKey(key);
         redisTemplate.opsForValue().set(cacheKey, value);
         redisTemplate.expire(cacheKey, expireHours, TimeUnit.HOURS);
+    }
+    
+    /**
+     * 缓存任意对象（永久有效）
+     * @param key 缓存键
+     * @param value 缓存值
+     */
+    public void cacheValuePermanently(String key, String value) {
+        String cacheKey = getFullCacheKey(key);
+        redisTemplate.opsForValue().set(cacheKey, value);
+        // 不设置过期时间，使缓存永久有效
     }
     
     /**
@@ -275,7 +284,7 @@ public class CacheService {
         String key = getFullCacheKey("folder_all_files:" + folderId);
         try {
             redisTemplate.opsForValue().set(key, mapper.writeValueAsString(fileIds));
-            redisTemplate.expire(key, 24, TimeUnit.HOURS);
+            // 不设置过期时间，使缓存永久有效
         } catch (Exception e) {
             System.err.println("缓存folder_all_files失败: " + e.getMessage());
         }
@@ -319,12 +328,4 @@ public class CacheService {
             }
         }
     }
-
-
-
-
-
-
-
-
 } 

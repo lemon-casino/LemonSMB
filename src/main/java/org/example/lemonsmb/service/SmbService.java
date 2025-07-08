@@ -956,4 +956,59 @@ public class SmbService {
         }
     }
 
+    /**
+     * 获取文件的最后修改时间
+     * @param filePath 文件路径
+     * @return 文件的最后修改时间（毫秒时间戳），如果获取失败则返回0
+     */
+    public long getFileLastModifiedTime(String filePath) throws IOException {
+        try {
+            connectionLock.lock();
+            if (!initialized) {
+                init();
+            }
+            
+            try {
+                // 获取文件所在目录路径和文件名
+                String parentPath = filePath.substring(0, filePath.lastIndexOf('/'));
+                String fileName = filePath.substring(filePath.lastIndexOf('/') + 1);
+                
+                // 列出目录中的文件
+                for (FileIdBothDirectoryInformation fileInfo : share.list(parentPath)) {
+                    if (fileName.equals(fileInfo.getFileName())) {
+                        // 找到匹配的文件，返回其最后修改时间
+                        return fileInfo.getLastWriteTime().toEpochMillis();
+                    }
+                }
+                
+                // 如果没有找到文件，抛出异常
+                throw new IOException("File not found: " + filePath);
+                
+            } catch (com.hierynomus.mssmb2.SMBApiException e) {
+                // 如果发生连接错误，尝试重新初始化连接
+                if (isConnectionError(e)) {
+                    System.out.println("检测到连接错误，尝试重新初始化连接...");
+                    cleanup();
+                    init();
+                    
+                    // 重试一次
+                    String parentPath = filePath.substring(0, filePath.lastIndexOf('/'));
+                    String fileName = filePath.substring(filePath.lastIndexOf('/') + 1);
+                    
+                    for (FileIdBothDirectoryInformation fileInfo : share.list(parentPath)) {
+                        if (fileName.equals(fileInfo.getFileName())) {
+                            return fileInfo.getLastWriteTime().toEpochMillis();
+                        }
+                    }
+                    
+                    throw new IOException("File not found: " + filePath);
+                } else {
+                    throw new IOException(e);
+                }
+            }
+        } finally {
+            connectionLock.unlock();
+        }
+    }
+
 }
